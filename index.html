@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
 <title>SlapChat</title>
 <meta name="theme-color" content="#128c7e"/>
-<link rel="manifest" href="manifest.json"/>
+<link rel="manifest" href="manifest.json" crossorigin="use-credentials"/>
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png"/>
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
 <link rel="apple-touch-icon" href="icon-192.png"/>
@@ -1696,7 +1696,7 @@ document.addEventListener('click', e => {
 // ── SERVICE WORKER REGISTRATION ──
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('/slapchat/sw.js', { scope: '/slapchat/' })
       .then(reg => console.log('SW registered:', reg.scope))
       .catch(err => console.warn('SW registration failed:', err));
   });
