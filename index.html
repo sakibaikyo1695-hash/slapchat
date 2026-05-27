@@ -821,6 +821,14 @@ const FIREBASE_CONFIG = {
 firebase.initializeApp(FIREBASE_CONFIG);
 const auth     = firebase.auth();
 const db       = firebase.database();
+
+// Enable Firebase offline persistence — DB data cached to disk
+// This is the KEY feature that makes offline work for Firebase apps
+try {
+  firebase.database().goOffline();
+  firebase.database().goOnline();
+} catch(e) {}
+
 // Keep user logged in forever until they explicitly sign out
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
@@ -844,22 +852,96 @@ let adminFilter   = 'pending';
 // ═══════════════════════════════════════════════
 //  BOOT
 // ═══════════════════════════════════════════════
-auth.onAuthStateChanged(async user => {
-  hide('loadingScreen');
-  if (!user) { showAuthForm(); return; }
 
-  const snap = await db.ref(`users/${user.uid}`).get();
-  if (!snap.exists()) { showAuthForm(); auth.signOut(); return; }
+// Load app from localStorage cache (for offline use)
+function loadAppFromCache(uid) {
+  const cached = localStorage.getItem('sc_me');
+  if (!cached) return false;
+  try {
+    ME = JSON.parse(cached);
+    ME.uid = uid;
+    if (ME.status !== 'approved') return false;
+    hide('loadingScreen');
+    hide('authScreen');
+    show('app');
+    // Show offline banner immediately
+    if (!navigator.onLine) {
+      document.getElementById('offlineBanner').style.display = 'flex';
+    }
+    // Load cached chats (no Firebase needed)
+    const cachedChats = localStorage.getItem('sc_chats_' + uid);
+    if (cachedChats) {
+      try {
+        chatsCache = JSON.parse(cachedChats);
+        renderChatList(Object.values(chatsCache));
+      } catch(e) {}
+    }
+    if (ME.role === 'admin') show('adminBtn');
+    return true;
+  } catch(e) { return false; }
+}
+
+auth.onAuthStateChanged(async user => {
+  if (!user) {
+    hide('loadingScreen');
+    showAuthForm();
+    return;
+  }
+
+  // OFFLINE: skip Firebase DB call, use localStorage cache
+  if (!navigator.onLine) {
+    const loaded = loadAppFromCache(user.uid);
+    if (loaded) {
+      showToast('Offline — showing cached data');
+      return;
+    }
+    // No cache — show error
+    hide('loadingScreen');
+    showAuthForm();
+    showToast('No internet and no cached data. Please connect and try again.');
+    return;
+  }
+
+  // ONLINE: fetch from Firebase with timeout fallback to cache
+  let snap;
+  try {
+    // Race: Firebase fetch vs 5 second timeout
+    snap = await Promise.race([
+      db.ref(`users/${user.uid}`).get(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+    ]);
+  } catch(e) {
+    // Firebase timed out or failed — try cache
+    console.warn('Firebase unavailable, loading from cache:', e.message);
+    const loaded = loadAppFromCache(user.uid);
+    if (loaded) {
+      showToast('Loading from cache...');
+      // Keep trying Firebase in background
+      setTimeout(() => location.reload(), 10000);
+      return;
+    }
+    hide('loadingScreen');
+    showAuthForm();
+    showToast('Cannot connect. Please check internet.');
+    return;
+  }
+
+  if (!snap || !snap.exists()) {
+    hide('loadingScreen');
+    showAuthForm();
+    auth.signOut();
+    return;
+  }
 
   ME = snap.val();
   ME.uid = user.uid;
-  // Cache own profile for offline
   localStorage.setItem('sc_me', JSON.stringify(ME));
 
-  if (ME.status === 'pending') { showPending(); return; }
+  if (ME.status === 'pending') { hide('loadingScreen'); showPending(); return; }
   if (ME.status === 'banned')  { showToast('Your account has been banned.'); auth.signOut(); return; }
 
-  // approved — load app
+  // Approved — load app normally
+  hide('loadingScreen');
   hide('authScreen');
   show('app');
   setupPresence(user.uid);
