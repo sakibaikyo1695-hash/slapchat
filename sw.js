@@ -43,6 +43,9 @@ self.addEventListener('fetch', event => {
 
   const url = event.request.url;
 
+  // Skip non-http requests (chrome-extension, data:, blob: etc)
+  if (!url.startsWith('http')) return;
+
   // Never intercept Firebase / Google auth APIs
   if (
     url.includes('firebaseio.com') ||
