@@ -244,6 +244,7 @@ input, textarea { font-family:var(--font); }
 /* messages area */
 #messagesArea {
   flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:2px;
+  justify-content: flex-end;
 }
 .msg-day-divider {
   text-align:center; margin:10px 0;
@@ -1542,10 +1543,8 @@ function renderMessages(msgsArray, area) {
     }
     try { area.appendChild(buildBubble(msg)); } catch(e) { console.warn('Bubble error:', e); }
   });
-  // Scroll to bottom only if user was already near bottom
-  if (wasAtBottom || msgsArray.length <= 10) {
-    area.scrollTop = area.scrollHeight;
-  }
+  // Always scroll to bottom after render
+  area.scrollTop = area.scrollHeight;
 }
 
 // ═══════════════════════════════════════════════
