@@ -295,7 +295,6 @@ input, textarea { font-family:var(--font); }
 .input-bar {
   display:flex; gap:8px; align-items:flex-end;
   padding:10px 14px;
-  padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px));
   background:#f0f2f5; border-top:1px solid var(--border);
   flex-shrink:0;
   position:relative;
@@ -437,10 +436,14 @@ input, textarea { font-family:var(--font); }
   #sidebar {
     position: fixed;
     z-index: 10;
-    left: 0; top: 0; bottom: 0; right: 0;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
     width: 100vw;
     transform: translateX(0);
     transition: transform .3s ease;
+    padding-bottom: 0; /* bottom already handled by bottom property */
   }
   #sidebar.hidden-mobile {
     transform: translateX(-100%);
@@ -449,14 +452,17 @@ input, textarea { font-family:var(--font); }
   /* Chat window slides in from right */
   #chatWindow {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Push bottom edge UP above the iOS home bar */
+    bottom: env(safe-area-inset-bottom, 0px);
     transform: translateX(100%);
     transition: transform .3s ease;
     z-index: 20;
     display: flex;
     flex-direction: column;
-    height: 100%;
-    height: -webkit-fill-available;
   }
   #chatWindow.open {
     transform: translateX(0);
@@ -468,10 +474,11 @@ input, textarea { font-family:var(--font); }
     -webkit-overflow-scrolling: touch;
     min-height: 0;
   }
-  /* Input bar: always above home bar — SimpliFly exact pattern */
+  /* Input bar: normal padding, no extra safe area needed
+     because the window itself is already above the home bar */
   #chatWindow .input-bar {
     flex-shrink: 0;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: 12px;
   }
 
   /* Show back button on mobile */
