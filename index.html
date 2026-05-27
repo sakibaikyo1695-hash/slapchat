@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover"/>
 <title>SlapChat</title>
 <meta name="theme-color" content="#128c7e"/>
 <link rel="manifest" href="manifest.json"/>
@@ -26,6 +26,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
 
 :root {
+  --sat: env(safe-area-inset-top, 0px);
   --bg:        #f0f2f5;
   --bg2:       #ffffff;
   --bg3:       #f7f8fa;
@@ -66,7 +67,7 @@ input, textarea { font-family:var(--font); }
   position:fixed; inset:0; z-index:9999;
   background:linear-gradient(135deg,#128c7e 0%,#075e54 100%);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:20px; padding:24px;
+  gap:20px; padding:24px; padding-top:calc(24px + var(--sat));
 }
 #authScreen .logo {
   font-family:var(--title); font-size:2.2rem; font-weight:700;
@@ -127,10 +128,11 @@ input, textarea { font-family:var(--font); }
   background:var(--panel); border-right:1px solid var(--border);
   display:flex; flex-direction:column; height:100vh; overflow:hidden;
   transition:transform .3s;
+  padding-bottom:env(safe-area-inset-bottom, 0px);
 }
 .sidebar-header {
   display:flex; align-items:center; gap:12px;
-  padding:14px 16px; background:#128c7e; border-bottom:1px solid var(--border);
+  padding:14px 16px; padding-top:calc(14px + var(--sat)); background:#128c7e; border-bottom:1px solid var(--border);
   min-height:60px;
 }
 .sidebar-header .app-name { font-family:var(--title); font-size:1rem; color:#ffffff; letter-spacing:2px; flex:1; }
@@ -191,7 +193,7 @@ input, textarea { font-family:var(--font); }
 }
 .chat-header {
   display:flex; align-items:center; gap:12px; padding:10px 16px;
-  background:#128c7e; color:#ffffff; border-bottom:1px solid var(--border); min-height:60px;
+  padding-top:calc(10px + var(--sat)); background:#128c7e; color:#ffffff; border-bottom:1px solid var(--border); min-height:60px;
 }
 .chat-header .back-btn { display:none; color:var(--text2); font-size:1.2rem; }
 .header-info { flex:1; min-width:0; }
@@ -291,7 +293,8 @@ input, textarea { font-family:var(--font); }
 
 /* input bar */
 .input-bar {
-  padding:10px 14px; background:#f0f2f5; border-top:1px solid var(--border);
+  padding:10px 14px; padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px));
+  background:#f0f2f5; border-top:1px solid var(--border);
   display:flex; align-items:flex-end; gap:10px;
 }
 .reply-preview {
@@ -423,13 +426,7 @@ input, textarea { font-family:var(--font); }
     width: 100%;
   }
 
-  /* Safe area padding for notch/home bar phones */
-  #app {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-    height: 100%;
-    height: -webkit-fill-available;
-  }
+
 
   /* Sidebar = full screen chat list */
   #sidebar {
@@ -475,20 +472,9 @@ input, textarea { font-family:var(--font); }
   /* Show back button on mobile */
   .chat-header .back-btn { display:flex !important; }
 
-  /* Input bar safe area */
-  .input-bar {
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
-  }
 
-  /* Sidebar header safe area */
-  .sidebar-header {
-    padding-top: calc(14px + env(safe-area-inset-top));
-  }
 
-  /* Chat header safe area */
-  .chat-header {
-    padding-top: calc(10px + env(safe-area-inset-top));
-  }
+
 
   /* Larger touch targets on mobile */
   .icon-btn { width:42px; height:42px; }
@@ -585,13 +571,7 @@ input, textarea { font-family:var(--font); }
 
 <!-- ══ MAIN APP ══ -->
 <div id="app">
-  <!-- Offline Banner -->
-  <div id="offlineBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9990;
-    background:#e53935;color:#fff;font-size:0.82rem;font-family:'Rajdhani',sans-serif;
-    font-weight:600;letter-spacing:1px;padding:6px 16px;
-    align-items:center;justify-content:center;gap:8px;">
-    📡 NO INTERNET — Showing cached data. Sending disabled.
-  </div>
+
   <!-- Sidebar -->
   <div id="sidebar">
     <div class="sidebar-header">
@@ -844,73 +824,99 @@ let typingTimeout = null;
 let adminFilter   = 'pending';
 
 // ═══════════════════════════════════════════════
-//  OFFLINE SESSION CACHE  (same pattern as SimpliFly)
-//  Saves session on login, loads it back when offline.
-//  Expires after 30 days of no online use.
+//  OFFLINE SESSION CACHE  — exact SimpliFly pattern
 // ═══════════════════════════════════════════════
-const OFFLINE_KEY  = 'slapchat_offline_session_v1';
-const OFFLINE_DAYS = 30;
-let   _offlineBooted = false;
+var _offlineBooted   = false;
+var OFFLINE_CACHE_KEY  = 'slapchat_offline_session_v1';
+var OFFLINE_CACHE_DAYS = 30;
 
-function saveOfflineSession(uid, data) {
+function saveOfflineSession(uid, userData) {
   try {
-    localStorage.setItem(OFFLINE_KEY, JSON.stringify({
-      uid, displayName: data.displayName || '',
-      email: data.email || '', handle: data.handle || '',
-      role: data.role || 'user', status: 'approved',
-      photoURL: data.photoURL || '', savedAt: Date.now()
-    }));
+    var session = {
+      uid: uid,
+      displayName: userData.displayName || '',
+      email:       userData.email       || '',
+      handle:      userData.handle      || '',
+      role:        userData.role        || 'user',
+      photoURL:    userData.photoURL    || '',
+      status:      'approved',
+      savedAt:     Date.now()
+    };
+    localStorage.setItem(OFFLINE_CACHE_KEY, JSON.stringify(session));
   } catch(e) {}
 }
 
 function loadOfflineSession() {
   try {
-    const raw = localStorage.getItem(OFFLINE_KEY);
+    var raw = localStorage.getItem(OFFLINE_CACHE_KEY);
     if (!raw) return null;
-    const s = JSON.parse(raw);
-    if (Date.now() - s.savedAt > OFFLINE_DAYS * 86400000) {
-      localStorage.removeItem(OFFLINE_KEY); return null;
+    var session = JSON.parse(raw);
+    if (Date.now() - session.savedAt > OFFLINE_CACHE_DAYS * 86400000) {
+      localStorage.removeItem(OFFLINE_CACHE_KEY);
+      return null;
     }
-    if (s.status !== 'approved') return null;
-    return s;
+    if (session.status !== 'approved') return null;
+    return session;
   } catch(e) { return null; }
 }
 
 function clearOfflineSession() {
-  localStorage.removeItem(OFFLINE_KEY);
+  localStorage.removeItem(OFFLINE_CACHE_KEY);
+}
+
+function isOnline() {
+  return navigator.onLine !== false;
 }
 
 function bootWithOfflineSession(session) {
   _offlineBooted = true;
-  ME = { uid: session.uid, displayName: session.displayName,
-         email: session.email, handle: session.handle,
-         role: session.role, status: 'approved',
-         photoURL: session.photoURL || '' };
+  ME = {
+    uid:         session.uid,
+    displayName: session.displayName,
+    email:       session.email,
+    handle:      session.handle      || '',
+    role:        session.role        || 'user',
+    photoURL:    session.photoURL    || '',
+    status:      'approved'
+  };
 
   hide('loadingScreen');
   hide('authScreen');
   show('app');
   if (ME.role === 'admin') show('adminBtn');
 
-  // Show offline banner that fades out
-  const banner = document.getElementById('offlineBanner');
-  banner.style.display = 'flex';
-  banner.textContent   = '📡 OFFLINE — Showing cached data. Sending disabled.';
-  setTimeout(() => { banner.style.opacity = '0'; }, 3500);
-  setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 4300);
+  // Offline banner — fades out after 3.5s (exactly as SimpliFly)
+  var banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;' +
+    'background:rgba(255,140,0,0.92);color:#000;text-align:center;' +
+    'font-size:12px;font-weight:700;padding:6px 8px;letter-spacing:1px;' +
+    'pointer-events:none;transition:opacity 0.8s ease;';
+  banner.textContent = '⚠ OFFLINE MODE — Showing cached data. Sending disabled.';
+  document.body.appendChild(banner);
+  setTimeout(function() { banner.style.opacity = '0'; }, 3500);
+  setTimeout(function() { if (banner.parentNode) banner.parentNode.removeChild(banner); }, 4300);
 
   // Load cached chats immediately
-  const cachedChats = localStorage.getItem('sc_chats_' + ME.uid);
+  var cachedChats = localStorage.getItem('sc_chats_' + ME.uid);
   if (cachedChats) {
     try { chatsCache = JSON.parse(cachedChats); renderChatList(Object.values(chatsCache)); } catch(e) {}
   }
 }
 
-// ── Check offline cache at startup (BEFORE onAuthStateChanged) ──
+// ── Check offline cache at startup — BEFORE onAuthStateChanged fires ──
 (function() {
-  const session = loadOfflineSession();
-  if (!navigator.onLine && session) {
-    bootWithOfflineSession(session);
+  var cachedSession = loadOfflineSession();
+  if (!isOnline()) {
+    if (cachedSession) {
+      _offlineBooted = true;
+      bootWithOfflineSession(cachedSession);
+    }
+    // else: stay on login screen
+  } else {
+    if (cachedSession) {
+      // Online with cache — Firebase will take over, show "Restoring..."
+      setMsg('Restoring session...', '');
+    }
   }
 })();
 
@@ -918,26 +924,23 @@ function bootWithOfflineSession(session) {
 //  BOOT — Firebase Auth Gate
 // ═══════════════════════════════════════════════
 auth.onAuthStateChanged(async user => {
-  // If already booted offline, don't override
-  if (_offlineBooted) return;
+  if (_offlineBooted) return;   // already booted from cache — don't override
 
   hide('loadingScreen');
 
   if (!user) { showAuthForm(); return; }
 
-  // Online — fetch user profile from Firebase
   let snap;
   try {
     snap = await db.ref(`users/${user.uid}`).get();
   } catch(e) {
-    // Firebase failed (no internet despite navigator.onLine = true)
-    // Try falling back to cache
-    const session = loadOfflineSession();
+    // Firebase failed — fallback to offline cache
+    var session = loadOfflineSession();
     if (session && session.uid === user.uid) {
       bootWithOfflineSession(session);
     } else {
       showAuthForm();
-      showToast('Cannot connect to server. Please check internet.');
+      showToast('Cannot connect. Check internet.');
     }
     return;
   }
@@ -950,11 +953,10 @@ auth.onAuthStateChanged(async user => {
   if (ME.status === 'pending') { showPending(); return; }
   if (ME.status === 'banned')  { showToast('Your account has been banned.'); auth.signOut(); return; }
 
-  // Save session for offline use
+  // ── Save offline session (exact SimpliFly pattern) ──
   saveOfflineSession(user.uid, ME);
   localStorage.setItem('sc_me', JSON.stringify(ME));
 
-  // Load app
   hide('authScreen');
   show('app');
   setupPresence(user.uid);
@@ -993,14 +995,15 @@ async function doAuth() {
   if (!email || !password) { setMsg('Please fill all fields.','error'); return; }
 
   if (authMode === 'login') {
-    // No internet — try offline cache
-    if (!navigator.onLine) {
-      const session = loadOfflineSession();
+    // No internet — try offline cache (exact SimpliFly pattern)
+    if (!isOnline()) {
+      var session = loadOfflineSession();
       if (session && session.email && session.email.toLowerCase() === email.toLowerCase()) {
+        _offlineBooted = true;
         bootWithOfflineSession(session);
         return;
       }
-      setMsg('No internet. Connect first to log in for the first time.', 'error');
+      setMsg('No internet. Connect to internet for first-time login.', 'error');
       return;
     }
     try {
@@ -1034,8 +1037,9 @@ async function doAuth() {
 
 function signOut() {
   if (presenceRef) presenceRef.onDisconnect().cancel();
-  if (presenceRef) presenceRef.set(false);
+  if (presenceRef) presenceRef.set({ online: false, lastSeen: Date.now() });
   clearOfflineSession();
+  _offlineBooted = false;
   auth.signOut();
   location.reload();
 }
@@ -1051,14 +1055,8 @@ function setupPresence(uid) {
 }
 
 // Monitor online/offline state
-window.addEventListener('online',  () => {
-  document.getElementById('offlineBanner').style.display = 'none';
-  showToast('Back online ✓');
-});
-window.addEventListener('offline', () => {
-  document.getElementById('offlineBanner').style.display = 'flex';
-  showToast('You are offline. Cached data shown.');
-});
+window.addEventListener('online',  () => { showToast('Back online ✓'); });
+window.addEventListener('offline', () => { showToast('You are offline. Showing cached data.'); });
 
 // ═══════════════════════════════════════════════
 //  CHAT LIST
@@ -2149,65 +2147,73 @@ document.addEventListener('click', e => {
 
 // ═══════════════════════════════════════════════
 //  NOTIFICATIONS
+//  Web Notification API — works on:
+//  ✓ Chrome/Edge desktop
+//  ✓ Chrome Android (browser + PWA)
+//  ✓ Android Studio APK (WebView with permission)
+//  ✗ iOS Safari (Apple restriction)
 // ═══════════════════════════════════════════════
 
-// Ask permission once after login
 function requestNotifPermission() {
   if (!('Notification' in window)) return;
   if (Notification.permission === 'default') {
-    // Small delay so it doesn't fire immediately on login
     setTimeout(() => {
-      Notification.requestPermission();
-    }, 3000);
+      Notification.requestPermission().then(perm => {
+        if (perm === 'granted') showToast('Notifications enabled ✓');
+        else if (perm === 'denied') showToast('Notifications blocked. Enable in browser settings.');
+      });
+    }, 2500);
   }
 }
 
-// Show a native browser notification
 function showNotification(title, body, chatId, otherUid) {
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
-  // Don't notify if the chat is already open and page is visible
+  // Suppress if chat is open and tab is visible
   if (document.visibilityState === 'visible' && currentChatId === chatId) return;
 
-  const notif = new Notification(title, {
-    body:  body,
-    icon:  'icon-192.png',
-    badge: 'icon-192.png',
-    tag:   chatId,          // one notification per chat (replaces old one)
-    renotify: true,
-  });
-
-  // Clicking notification opens that chat
-  notif.onclick = () => {
-    window.focus();
-    if (otherUid) openChat(chatId, otherUid);
-    notif.close();
-  };
-
-  // Auto close after 5 seconds
-  setTimeout(() => notif.close(), 5000);
+  try {
+    var notif = new Notification(title, {
+      body:     body,
+      icon:     'icon-192.png',
+      badge:    'icon-192.png',
+      tag:      chatId,        // replaces previous notif from same chat
+      renotify: true,
+      silent:   false
+    });
+    notif.onclick = function() {
+      window.focus();
+      if (otherUid) openChat(chatId, otherUid);
+      notif.close();
+    };
+    setTimeout(function() { notif.close(); }, 6000);
+  } catch(e) {
+    console.warn('Notification error:', e);
+  }
 }
 
-// Listen for new messages across ALL my chats
-let notifListeners = {};
-function listenForIncomingMessages() {
-  // Watch userChats for changes — when a new message arrives, lastTime updates
-  db.ref(`userChats/${ME.uid}`).on('child_changed', async snap => {
-    const chat = { chatId: snap.key, ...snap.val() };
-    if (!chat.lastMsg || !chat.otherUid) return;
-    // Only notify if this chat is not currently open or page not visible
-    if (currentChatId === chat.chatId && document.visibilityState === 'visible') return;
-    // Only notify for messages sent BY THE OTHER PERSON (unread > 0)
-    if (!chat.unread || chat.unread < 1) return;
+// Also update document title with unread count (works even without notification permission)
+function updatePageTitle() {
+  var totalUnread = 0;
+  Object.values(chatsCache).forEach(c => { totalUnread += (c.unread || 0); });
+  document.title = totalUnread > 0 ? '(' + totalUnread + ') SlapChat' : 'SlapChat';
+}
 
-    const other = await getUser(chat.otherUid);
-    const senderName = other.displayName || 'Someone';
-    showNotification(
-      '💬 ' + senderName,
-      chat.lastMsg,
-      chat.chatId,
-      chat.otherUid
-    );
+function listenForIncomingMessages() {
+  db.ref('userChats/' + ME.uid).on('child_changed', async snap => {
+    var chat = { chatId: snap.key, ...snap.val() };
+    if (!chat.lastMsg || !chat.otherUid) return;
+    if (!chat.unread || chat.unread < 1) return;
+    if (currentChatId === chat.chatId && document.visibilityState === 'visible') return;
+
+    var other = await getUser(chat.otherUid);
+    showNotification('💬 ' + (other.displayName || 'New message'), chat.lastMsg, chat.chatId, chat.otherUid);
+    updatePageTitle();
+  });
+
+  // Clear title unread count when tab becomes active
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') updatePageTitle();
   });
 }
 
