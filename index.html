@@ -798,7 +798,7 @@ async function openChat(chatId, otherUid) {
 
   hide('emptyState');
   const pane = document.getElementById('activeChatPane');
-  pane.style.display = 'flex';
+  pane.style.display = 'flex'; pane.style.flexDirection = 'column';
   document.getElementById('chatWindow').classList.add('open');
 
   // mark as read
@@ -1268,7 +1268,12 @@ function initials(name) {
 // ═══════════════════════════════════════════════
 function v(id) { return document.getElementById(id).value; }
 function esc(s) { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
-function show(id) { document.getElementById(id).style.display=''; }
+function show(id) {
+  const el = document.getElementById(id);
+  // Restore correct display type based on element
+  const flexIds = ['app','activeChatPane','replyPreview','newChatModal','profileModal','adminModal','lightbox'];
+  el.style.display = flexIds.includes(id) ? 'flex' : '';
+}
 function hide(id) { document.getElementById(id).style.display='none'; }
 function openModal(id)  { document.getElementById(id).classList.add('show'); }
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
