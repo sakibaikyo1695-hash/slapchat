@@ -248,7 +248,7 @@ input, textarea { font-family:var(--font); }
 .reply-quote .quote-text { color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 .msg-sender { font-size:0.78rem; color:var(--accent); font-weight:600; margin-bottom:3px; }
-.msg-text { font-size:0.95rem; color:var(--text); line-height:1.4; }
+.msg-text { font-size:0.95rem; color:var(--text); line-height:1.4; white-space:pre-wrap; word-break:break-word; }
 .msg-footer { display:flex; align-items:center; justify-content:flex-end; gap:5px; margin-top:4px; }
 .msg-time { font-size:0.7rem; color:var(--text3); }
 .msg-tick { font-size:0.75rem; color:var(--tick); }
@@ -1182,7 +1182,8 @@ function buildBubble(msg) {
   if (msg.text) {
     const t = document.createElement('div');
     t.className = 'msg-text';
-    t.textContent = msg.text;
+    t.textContent = msg.text; // textContent preserves 
+, white-space:pre-wrap renders it
     bubble.appendChild(t);
   }
 
@@ -1239,7 +1240,7 @@ function buildBubble(msg) {
 // ═══════════════════════════════════════════════
 async function sendMessage() {
   if (!navigator.onLine) { showToast('No internet — cannot send message.'); return; }
-  const text = v('msgInput').trim();
+  const text = document.getElementById('msgInput').value.replace(/^[\n]+|[\n]+$/g, '');
   if (!text && !replyTarget) return;
   if (!currentChatId) return;
   const inp = document.getElementById('msgInput');
