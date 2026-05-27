@@ -1532,7 +1532,7 @@ function previewAvatarURL(url) {
     showToast('Google Photos links cannot be used directly. Use Imgur instead.');
     // Update the help text
     document.getElementById('photoURLHelp').innerHTML =
-      '⚠️ Google Photos links don't work. Upload to <a href="https://imgur.com/upload" target="_blank" style="color:var(--accent);">Imgur.com</a> (free) → right-click image → Copy Image Address → paste here.';
+      '⚠️ Google Photos links do not work. Upload to <a href="https://imgur.com/upload" target="_blank" style="color:var(--accent);">Imgur.com</a> (free, free account) → right-click image → Copy Image Address → paste here.';
     return;
   }
 
@@ -1832,10 +1832,10 @@ async function getPresence(uid) {
 
 function avatarHTML(u) {
   if (u && u.photoURL) {
-    const fb = initials(u.displayName || '?');
+    const fb = encodeURIComponent(initials(u.displayName || '?'));
     return `<img src="${u.photoURL}"
       style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
-      onerror="this.outerHTML='${fb}'"/>`;
+      onerror="this.outerHTML=decodeURIComponent('${fb}')"/>`;
   }
   return initials(u ? u.displayName : '?');
 }
