@@ -6,6 +6,9 @@
 <title>SlapChat</title>
 <meta name="theme-color" content="#128c7e"/>
 <link rel="manifest" href="manifest.json"/>
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png"/>
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
 
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -441,6 +444,7 @@ input, textarea { font-family:var(--font); }
 
 <!-- ══ LOADING ══ -->
 <div id="loadingScreen">
+  <img src="icon-192.png" style="width:80px;height:80px;border-radius:20px;margin-bottom:8px;" onerror="this.style.display='none'"/>
   <div style="font-family:'Orbitron',sans-serif;font-size:1.5rem;color:#128c7e;letter-spacing:4px;">SLAP<span style="color:#25d366;">CHAT</span></div>
   <div class="loader"></div>
 </div>
@@ -795,7 +799,12 @@ function setupPresence(uid) {
 function loadChats() {
   const ref = db.ref(`userChats/${ME.uid}`);
   ref.on('value', snap => {
-    chatsCache = snap.val() || {};
+    chatsCache = {};
+    if (snap.exists()) {
+      snap.forEach(child => {
+        chatsCache[child.key] = { chatId: child.key, ...child.val() };
+      });
+    }
     renderChatList(Object.values(chatsCache));
   });
 }
@@ -886,8 +895,13 @@ function listenMessages(chatId) {
   const ref = db.ref(`messages/${chatId}`).orderByChild('time');
   msgsListener = ref.on('value', snap => {
     area.innerHTML = '';
+    if (!snap || !snap.exists()) {
+      area.innerHTML = '<div style="text-align:center;color:var(--text3);padding:30px;font-size:0.85rem;">No messages yet. Say hello! 👋</div>';
+      return;
+    }
     let lastDay = '';
     snap.forEach(child => {
+      if (!child.val()) return;
       const msg = { id: child.key, ...child.val() };
       const day = dayLabel(msg.time);
       if (day !== lastDay) {
@@ -897,10 +911,9 @@ function listenMessages(chatId) {
         div.innerHTML = `<span>${day}</span>`;
         area.appendChild(div);
       }
-      area.appendChild(buildBubble(msg));
+      try { area.appendChild(buildBubble(msg)); } catch(e) { console.warn('Bubble error:', e, msg); }
     });
     area.scrollTop = area.scrollHeight;
-    // mark delivered
     if (currentChatId === chatId) {
       db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
     }
@@ -1039,10 +1052,10 @@ async function sendMessage() {
   autoResize(document.getElementById('msgInput'));
 
   // update userChats for both sides
-  const summary = { lastMsg: text || '📷', lastTime: msg.time };
+  const summary = { lastMsg: text || '📷', lastTime: msg.time, chatId: currentChatId };
   await db.ref(`userChats/${ME.uid}/${currentChatId}`).update({ ...summary, otherUid: currentOther });
-  const other = chatsCache[currentChatId] || {};
-  const theirUnread = (other.theirUnread || 0) + 1;
+  const cached = chatsCache[currentChatId] || {};
+  const theirUnread = (cached.unread || 0) + 1;
   await db.ref(`userChats/${currentOther}/${currentChatId}`).update({
     ...summary, otherUid: ME.uid, unread: theirUnread
   });
@@ -1068,7 +1081,7 @@ async function sendImage(input) {
   await msgRef.set(msg);
   msgRef.update({ delivered: true });
 
-  const summary = { lastMsg: '📷 Image', lastTime: msg.time };
+  const summary = { lastMsg: '📷 Image', lastTime: msg.time, chatId: currentChatId };
   await db.ref(`userChats/${ME.uid}/${currentChatId}`).update({ ...summary, otherUid: currentOther });
   await db.ref(`userChats/${currentOther}/${currentChatId}`).update({ ...summary, otherUid: ME.uid, unread: firebase.database.ServerValue.increment(1) });
   input.value = '';
@@ -1235,8 +1248,8 @@ async function startChat(user) {
   // chat ID = sorted uids joined
   const chatId = [ME.uid, user.uid].sort().join('_');
   // ensure userChats entries
-  await db.ref(`userChats/${ME.uid}/${chatId}`).update({ otherUid: user.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
-  await db.ref(`userChats/${user.uid}/${chatId}`).update({ otherUid: ME.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
+  await db.ref(`userChats/${ME.uid}/${chatId}`).update({ chatId, otherUid: user.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
+  await db.ref(`userChats/${user.uid}/${chatId}`).update({ chatId, otherUid: ME.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
   closeModal('newChatModal');
   openChat(chatId, user.uid);
 }
