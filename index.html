@@ -951,13 +951,14 @@ window.addEventListener('online',  () => {
 });
 window.addEventListener('offline', () => {
   document.getElementById('offlineBanner').style.display = 'flex';
+  showToast('You are offline. Cached data shown.');
 });
 
 // ═══════════════════════════════════════════════
 //  CHAT LIST
 // ═══════════════════════════════════════════════
 function loadChats() {
-  // Load from localStorage first (instant offline display)
+  // Load from localStorage first for instant display
   const cached = localStorage.getItem('sc_chats_' + ME.uid);
   if (cached) {
     try {
@@ -966,40 +967,44 @@ function loadChats() {
     } catch(e) {}
   }
 
-  // Then live from Firebase
+  // Firebase live listener — always overwrites cache render
   const ref = db.ref(`userChats/${ME.uid}`);
   ref.on('value', snap => {
-    chatsCache = {};
-    if (snap.exists()) {
+    const fresh = {};
+    if (snap && snap.exists()) {
       snap.forEach(child => {
-        chatsCache[child.key] = { chatId: child.key, ...child.val() };
+        fresh[child.key] = { chatId: child.key, ...child.val() };
       });
     }
-    // Save to localStorage for offline use
+    chatsCache = fresh;
     localStorage.setItem('sc_chats_' + ME.uid, JSON.stringify(chatsCache));
-    renderChatList(Object.values(chatsCache));
+    renderChatList(Object.values(chatsCache)); // This always replaces — no duplicates
   }, err => {
-    // Firebase failed (offline) — keep showing cached data
-    console.log('Offline — showing cached chats');
-    showToast('Offline — showing cached data');
+    console.log('Offline — using cached chats');
   });
 }
 
+let _renderVersion = 0;
 async function renderChatList(chats) {
-  // Deduplicate by chatId — keep only the latest entry per chatId
+  // Increment version — if a newer render starts, this one aborts
+  const myVersion = ++_renderVersion;
+
+  // Deduplicate by chatId
   const seen = {};
   const unique = [];
   chats.forEach(c => {
-    if (!c.chatId) return;
+    if (!c || !c.chatId) return;
     if (!seen[c.chatId]) { seen[c.chatId] = true; unique.push(c); }
   });
-  // sort by last message time desc
   unique.sort((a,b) => (b.lastTime||0) - (a.lastTime||0));
+
   const list = document.getElementById('chatList');
+  // Clear immediately so we always start fresh
   list.innerHTML = '';
-  chats = unique;
 
   for (const c of unique) {
+    // If a newer render has started, stop this one
+    if (myVersion !== _renderVersion) return;
     const other = await getUser(c.otherUid);
     const presence = await getPresence(c.otherUid);
     const unread = (c.unread || 0);
@@ -1789,7 +1794,7 @@ async function sendNotice() {
 }
 
 async function loadNoticeHistory() {
-  const snap = await db.ref('notices').orderByChild('sentAt').limitToLast(10).get();
+  const snap = await db.ref('notices').limitToLast(10).get();
   const hist = document.getElementById('noticeHistory');
   hist.innerHTML = '';
   const notices = [];
@@ -1820,7 +1825,7 @@ async function deleteNotice(id) {
 function listenForNotices() {
   const seenKey = 'slapchat_seen_notices';
   const seen = JSON.parse(localStorage.getItem(seenKey) || '{}');
-  db.ref('notices').orderByChild('sentAt').limitToLast(5).on('value', snap => {
+  db.ref('notices').limitToLast(5).on('value', snap => {
     snap.forEach(child => {
       const n = child.val();
       const id = child.key;
