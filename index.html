@@ -940,10 +940,31 @@ function bootWithOfflineSession(session) {
   setTimeout(function() { banner.style.opacity = '0'; }, 3500);
   setTimeout(function() { if (banner.parentNode) banner.parentNode.removeChild(banner); }, 4300);
 
-  // Load cached chats immediately
+  // Pre-load all cached user profiles into allUsers memory
+  // so renderChatList doesn't need any async Firebase calls
+  try {
+    var keys = Object.keys(localStorage);
+    keys.forEach(function(k) {
+      if (k.startsWith('sc_user_')) {
+        var uid = k.replace('sc_user_', '');
+        try { allUsers[uid] = JSON.parse(localStorage.getItem(k)); } catch(e) {}
+      }
+    });
+  } catch(e) {}
+
+  // Load cached chats and render immediately
   var cachedChats = localStorage.getItem('sc_chats_' + ME.uid);
   if (cachedChats) {
-    try { chatsCache = JSON.parse(cachedChats); renderChatList(Object.values(chatsCache)); } catch(e) {}
+    try {
+      chatsCache = JSON.parse(cachedChats);
+      renderChatList(Object.values(chatsCache));
+    } catch(e) {}
+  } else {
+    // No cached chats yet
+    document.getElementById('chatList').innerHTML =
+      '<div style="padding:20px;text-align:center;color:#8696a0;font-size:0.85rem;">' +
+      'No cached chats.<br>Connect to internet to load your chats.' +
+      '</div>';
   }
 }
 
@@ -1169,8 +1190,15 @@ function loadChats() {
       });
     }
     chatsCache = fresh;
+    // Save to localStorage immediately — used for offline display
     localStorage.setItem('sc_chats_' + ME.uid, JSON.stringify(chatsCache));
     renderChatList(Object.values(chatsCache));
+    // Pre-cache all other users' profiles for offline use
+    Object.values(fresh).forEach(chat => {
+      if (chat.otherUid && !allUsers[chat.otherUid]) {
+        getUser(chat.otherUid); // populates allUsers + localStorage
+      }
+    });
 
     // For each chat with unread messages — mark those messages as delivered
     // (we received them even if chat not open)
@@ -2128,27 +2156,40 @@ function listenForNotices() {
 // ═══════════════════════════════════════════════
 async function getUser(uid) {
   if (allUsers[uid]) return allUsers[uid];
-  // Try localStorage cache first (for offline)
+
+  // Always try localStorage first — instant, works offline
   const lsKey = 'sc_user_' + uid;
   const cached = localStorage.getItem(lsKey);
   if (cached) {
-    try { allUsers[uid] = JSON.parse(cached); } catch(e) {}
+    try {
+      allUsers[uid] = JSON.parse(cached);
+    } catch(e) {}
   }
-  // Try Firebase
+
+  // If offline OR already loaded from cache — return immediately
+  if (!isOnline() || allUsers[uid]) {
+    return allUsers[uid] || { displayName: 'Unknown', handle: '', photoURL: '' };
+  }
+
+  // Online — fetch fresh from Firebase and update cache
   try {
     const snap = await db.ref(`users/${uid}`).get();
     if (snap.exists()) {
       allUsers[uid] = snap.val();
       localStorage.setItem(lsKey, JSON.stringify(allUsers[uid]));
     }
-  } catch(e) {
-    // Offline — use cached value
-  }
-  return allUsers[uid] || { displayName:'Unknown', handle:'', photoURL:'' };
+  } catch(e) {}
+
+  return allUsers[uid] || { displayName: 'Unknown', handle: '', photoURL: '' };
 }
 async function getPresence(uid) {
-  const snap = await db.ref(`presence/${uid}`).get();
-  return snap.val() || { online:false };
+  if (!isOnline()) return { online: false };
+  try {
+    const snap = await db.ref(`presence/${uid}`).get();
+    return snap.val() || { online: false };
+  } catch(e) {
+    return { online: false };
+  }
 }
 
 function avatarHTML(u) {
