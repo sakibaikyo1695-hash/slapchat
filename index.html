@@ -507,6 +507,10 @@ input, textarea { font-family:var(--font); }
 
 <!-- ══ AUTH SCREEN ══ -->
 <div id="authScreen" style="display:none">
+  <img src="icon-192.png" alt="SlapChat"
+    style="width:90px;height:90px;border-radius:24px;
+           box-shadow:0 8px 32px rgba(0,0,0,0.18);margin-bottom:4px;"
+    onerror="this.style.display='none'"/>
   <div class="logo">SLAP<span>CHAT</span></div>
   <div class="tagline">SECURE · REAL-TIME · CLOSED NETWORK</div>
 
@@ -799,6 +803,8 @@ auth.onAuthStateChanged(async user => {
   setupPresence(user.uid);
   loadChats();
   listenForNotices();
+  requestNotifPermission();
+  listenForIncomingMessages();
   if (ME.role === 'admin') show('adminBtn');
 });
 
@@ -1692,6 +1698,70 @@ document.addEventListener('click', e => {
     document.getElementById('emojiPanel').classList.remove('show');
   }
 });
+
+// ═══════════════════════════════════════════════
+//  NOTIFICATIONS
+// ═══════════════════════════════════════════════
+
+// Ask permission once after login
+function requestNotifPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    // Small delay so it doesn't fire immediately on login
+    setTimeout(() => {
+      Notification.requestPermission();
+    }, 3000);
+  }
+}
+
+// Show a native browser notification
+function showNotification(title, body, chatId, otherUid) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  // Don't notify if the chat is already open and page is visible
+  if (document.visibilityState === 'visible' && currentChatId === chatId) return;
+
+  const notif = new Notification(title, {
+    body:  body,
+    icon:  'icon-192.png',
+    badge: 'icon-192.png',
+    tag:   chatId,          // one notification per chat (replaces old one)
+    renotify: true,
+  });
+
+  // Clicking notification opens that chat
+  notif.onclick = () => {
+    window.focus();
+    if (otherUid) openChat(chatId, otherUid);
+    notif.close();
+  };
+
+  // Auto close after 5 seconds
+  setTimeout(() => notif.close(), 5000);
+}
+
+// Listen for new messages across ALL my chats
+let notifListeners = {};
+function listenForIncomingMessages() {
+  // Watch userChats for changes — when a new message arrives, lastTime updates
+  db.ref(`userChats/${ME.uid}`).on('child_changed', async snap => {
+    const chat = { chatId: snap.key, ...snap.val() };
+    if (!chat.lastMsg || !chat.otherUid) return;
+    // Only notify if this chat is not currently open or page not visible
+    if (currentChatId === chat.chatId && document.visibilityState === 'visible') return;
+    // Only notify for messages sent BY THE OTHER PERSON (unread > 0)
+    if (!chat.unread || chat.unread < 1) return;
+
+    const other = await getUser(chat.otherUid);
+    const senderName = other.displayName || 'Someone';
+    showNotification(
+      '💬 ' + senderName,
+      chat.lastMsg,
+      chat.chatId,
+      chat.otherUid
+    );
+  });
+}
 
 // ── SERVICE WORKER REGISTRATION ──
 if ('serviceWorker' in navigator) {
