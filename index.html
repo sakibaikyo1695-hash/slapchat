@@ -1049,7 +1049,7 @@ function loadChats() {
     } catch(e) {}
   }
 
-  // Firebase live listener — always overwrites cache render
+  // Firebase live listener
   const ref = db.ref(`userChats/${ME.uid}`);
   ref.on('value', snap => {
     const fresh = {};
@@ -1060,7 +1060,25 @@ function loadChats() {
     }
     chatsCache = fresh;
     localStorage.setItem('sc_chats_' + ME.uid, JSON.stringify(chatsCache));
-    renderChatList(Object.values(chatsCache)); // This always replaces — no duplicates
+    renderChatList(Object.values(chatsCache));
+
+    // For each chat with unread messages — mark those messages as delivered
+    // (we received them even if chat not open)
+    Object.values(fresh).forEach(chat => {
+      if (!chat.chatId || !chat.unread || chat.unread < 1) return;
+      db.ref(`messages/${chat.chatId}`)
+        .orderByChild('senderUid').equalTo(chat.otherUid)
+        .once('value', mSnap => {
+          if (!mSnap.exists()) return;
+          const updates = {};
+          mSnap.forEach(child => {
+            if (!child.val().delivered) updates[child.key + '/delivered'] = true;
+          });
+          if (Object.keys(updates).length > 0) {
+            db.ref(`messages/${chat.chatId}`).update(updates);
+          }
+        });
+    });
   }, err => {
     console.log('Offline — using cached chats');
   });
@@ -1139,8 +1157,21 @@ async function openChat(chatId, otherUid) {
     document.getElementById('sidebar').classList.add('hidden-mobile');
   }
 
-  // mark as read
+  // Mark unread count as 0
   db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
+  // Mark all their unread messages as READ
+  db.ref(`messages/${chatId}`).orderByChild('senderUid').once('value', snap => {
+    if (!snap.exists()) return;
+    const updates = {};
+    snap.forEach(child => {
+      const m = child.val();
+      if (m.senderUid !== ME.uid && !m.read) {
+        updates[child.key + '/read'] = true;
+        if (!m.delivered) updates[child.key + '/delivered'] = true;
+      }
+    });
+    if (Object.keys(updates).length > 0) db.ref(`messages/${chatId}`).update(updates);
+  });
 
   // presence for header status
   db.ref(`presence/${otherUid}`).on('value', snap => {
@@ -1218,10 +1249,36 @@ function listenMessages(chatId) {
       try { area.appendChild(buildBubble(msg)); } catch(e) { console.warn('Bubble error:', e, msg); }
     });
     area.scrollTop = area.scrollHeight;
-    // Cache messages for offline use (last 100 messages only)
     localStorage.setItem(msgCacheKey, JSON.stringify(msgsArray.slice(-100)));
+
     if (currentChatId === chatId) {
+      // Mark unread count as 0 in MY userChats
       db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
+
+      // Mark all THEIR messages as delivered (their app sent them, we received)
+      // and as read (we have this chat open right now)
+      const updates = {};
+      msgsArray.forEach(msg => {
+        if (msg.senderUid !== ME.uid) {
+          // Mark delivered + read since we have chat open
+          if (!msg.delivered) updates[msg.id + '/delivered'] = true;
+          if (!msg.read)      updates[msg.id + '/read']      = true;
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        db.ref(`messages/${chatId}`).update(updates);
+      }
+    } else {
+      // Chat not open — only mark as delivered (not read)
+      const updates = {};
+      msgsArray.forEach(msg => {
+        if (msg.senderUid !== ME.uid && !msg.delivered) {
+          updates[msg.id + '/delivered'] = true;
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        db.ref(`messages/${chatId}`).update(updates);
+      }
     }
   }, err => {
     console.log('Offline — showing cached messages');
@@ -1291,8 +1348,16 @@ function buildBubble(msg) {
   footer.appendChild(ts);
   if (mine) {
     const tick = document.createElement('span');
-    tick.className = 'msg-tick' + (msg.read ? ' read' : '');
-    tick.textContent = msg.delivered ? '✓✓' : '✓';
+    if (msg.read) {
+      tick.className = 'msg-tick read';  // blue ✓✓
+      tick.textContent = '✓✓';
+    } else if (msg.delivered) {
+      tick.className = 'msg-tick';       // grey ✓✓
+      tick.textContent = '✓✓';
+    } else {
+      tick.className = 'msg-tick';       // grey ✓
+      tick.textContent = '✓';
+    }
     footer.appendChild(tick);
   }
   bubble.appendChild(footer);
@@ -1347,8 +1412,9 @@ async function sendMessage() {
     senderName: ME.displayName,
     text,
     time:       Date.now(),
-    delivered:  false,
-    read:       false
+    sent:       true,      // ✓  grey  — always true once written
+    delivered:  false,     // ✓✓ grey  — set when other user's app loads messages
+    read:       false      // ✓✓ blue  — set when other user opens THIS chat
   };
   if (replyTarget) {
     msg.replyTo = {
@@ -1359,20 +1425,19 @@ async function sendMessage() {
 
   const ref = db.ref(`messages/${currentChatId}`).push();
   await ref.set(msg);
+
   clearReply();
   const msgInp = document.getElementById('msgInput');
   msgInp.value = '';
   autoResize(msgInp);
-  // Always refocus input after send — keeps keyboard open
   setTimeout(() => {
     msgInp.focus();
-    // On iOS, need a tiny delay for focus to work after DOM update
     if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
       setTimeout(() => msgInp.focus(), 100);
     }
   }, 30);
 
-  // update userChats for both sides
+  // Update userChats for both sides
   const summary = { lastMsg: text || '📷', lastTime: msg.time, chatId: currentChatId };
   await db.ref(`userChats/${ME.uid}/${currentChatId}`).update({ ...summary, otherUid: currentOther });
   const cached = chatsCache[currentChatId] || {};
@@ -1380,9 +1445,7 @@ async function sendMessage() {
   await db.ref(`userChats/${currentOther}/${currentChatId}`).update({
     ...summary, otherUid: ME.uid, unread: theirUnread
   });
-
-  // mark delivered
-  ref.update({ delivered: true });
+  // NOTE: delivered + read are set by the RECEIVER's app, not sender
 }
 
 
