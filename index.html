@@ -658,11 +658,28 @@ input, textarea { font-family:var(--font); }
   <div class="modal">
     <h2>MY PROFILE</h2>
     <div class="profile-avatar-wrap">
-      <div class="profile-avatar-large">
+      <div class="profile-avatar-large" id="profileAvatarLarge">
         <span id="profileAvatarContent"></span>
-        
       </div>
-      
+    </div>
+    <div class="profile-info-row">
+      <label>PROFILE PICTURE URL</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input class="inp" id="profilePhotoURL" type="url"
+          placeholder="Paste a direct image URL (e.g. from Imgur)"
+          oninput="previewAvatarURL(this.value)"
+          style="flex:1;"/>
+        <button onclick="clearAvatarURL()"
+          style="padding:8px 12px;border-radius:8px;background:var(--bg3);
+                 border:1px solid var(--border);color:var(--text2);
+                 font-size:0.82rem;cursor:pointer;white-space:nowrap;">
+          Clear
+        </button>
+      </div>
+      <div style="font-size:0.75rem;color:var(--text3);margin-top:4px;">
+        Upload your photo to <a href="https://imgur.com/upload" target="_blank"
+        style="color:var(--accent);">imgur.com</a> free → right-click image → Copy image address → paste here.
+      </div>
     </div>
     <div class="profile-info-row">
       <label>DISPLAY NAME</label>
@@ -1385,20 +1402,52 @@ function openProfileModal() {
   document.getElementById('profileName').value   = ME.displayName;
   document.getElementById('profileHandle').textContent = '@' + ME.handle;
   document.getElementById('profileEmail').textContent  = ME.email;
-  document.getElementById('profileAvatarContent').innerHTML = ME.photoURL ? `<img src="${ME.photoURL}"/>` : initials(ME.displayName);
+  const photoURL = ME.photoURL || '';
+  document.getElementById('profileAvatarContent').innerHTML = photoURL
+    ? `<img src="${photoURL}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`
+    : initials(ME.displayName);
+  document.getElementById('profilePhotoURL').value = photoURL;
   openModal('profileModal');
 }
 async function saveProfile() {
-  const name = document.getElementById('profileName').value.trim();
-  if (!name) return;
+  const name     = document.getElementById('profileName').value.trim();
+  const photoURL = document.getElementById('profilePhotoURL').value.trim();
+  if (!name) { showToast('Display name cannot be empty.'); return; }
+
+  // Validate URL if provided
+  if (photoURL && !photoURL.match(/^https?:\/\/.+\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i)) {
+    // Still allow it — just warn. Some URLs don't end with extension
+  }
+
   ME.displayName = name;
-  await db.ref(`users/${ME.uid}`).update({ displayName: name });
+  ME.photoURL    = photoURL;
+  await db.ref(`users/${ME.uid}`).update({ displayName: name, photoURL });
+  // Refresh avatar preview in sidebar if it's cached
+  allUsers[ME.uid] = { ...allUsers[ME.uid], displayName: name, photoURL };
   closeModal('profileModal');
-  showToast('Profile saved!');
+  showToast('Profile saved! ✓');
 }
-async function uploadAvatar(input) {
-  showToast('Photo upload requires Blaze plan. Not available.');
-  input.value = '';
+function previewAvatarURL(url) {
+  const content = document.getElementById('profileAvatarContent');
+  const large   = document.getElementById('profileAvatarLarge');
+  if (url && url.startsWith('http')) {
+    const img = new Image();
+    img.onload  = () => {
+      content.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`;
+    };
+    img.onerror = () => {
+      content.innerHTML = initials(ME.displayName);
+      showToast('Could not load image. Check the URL.');
+    };
+    img.src = url;
+  } else {
+    content.innerHTML = initials(ME.displayName);
+  }
+}
+
+function clearAvatarURL() {
+  document.getElementById('profilePhotoURL').value = '';
+  document.getElementById('profileAvatarContent').innerHTML = initials(ME.displayName);
 }
 function copyHandle() { navigator.clipboard.writeText(ME.handle); showToast('Handle copied!'); }
 
