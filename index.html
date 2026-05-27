@@ -1768,29 +1768,100 @@ async function searchUsers(q) {
 }
 
 async function startChat(user) {
-  // chat ID = sorted uids joined
   const chatId = [ME.uid, user.uid].sort().join('_');
-  // ensure userChats entries
-  await db.ref(`userChats/${ME.uid}/${chatId}`).update({ chatId, otherUid: user.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
-  await db.ref(`userChats/${user.uid}/${chatId}`).update({ chatId, otherUid: ME.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
+
+  // Check if this chat was previously deleted from DB
+  // If myUserChats entry doesn't exist, clear old message cache
+  const myEntry = await db.ref('userChats/' + ME.uid + '/' + chatId).get();
+  if (!myEntry.exists()) {
+    // Fresh start — clear any stale cached messages
+    localStorage.removeItem('sc_msgs_' + chatId);
+  }
+
+  await db.ref('userChats/' + ME.uid + '/' + chatId).update({ chatId, otherUid: user.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
+  await db.ref('userChats/' + user.uid + '/' + chatId).update({ chatId, otherUid: ME.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
+
   closeModal('newChatModal');
-  // Clear search so new chat appears in list
   const searchInput = document.getElementById('chatSearch');
   if (searchInput) searchInput.value = '';
   chatSearchQuery = '';
   openChat(chatId, user.uid);
 }
 
-async function deleteChat(chatId, otherName) {
-  if (!confirm(`Delete your chat with ${otherName}?\nThis removes it from YOUR list only. The other person's copy is not affected.`)) return;
-  // close chat pane if currently open
+function deleteChat(chatId, otherName) {
+  // Show custom delete choice modal
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:5000;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:24px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:14px;">
+      <div style="font-family:'Orbitron',sans-serif;font-size:0.9rem;color:#128c7e;letter-spacing:1px;">DELETE CHAT</div>
+      <div style="font-size:0.95rem;color:#111b21;">Delete your chat with <b>${esc(otherName)}</b>?</div>
+      <button id="delMySide" style="width:100%;padding:12px;border-radius:10px;background:#f0f2f5;border:1px solid #e2e8f0;font-family:'Rajdhani',sans-serif;font-size:0.95rem;font-weight:600;cursor:pointer;color:#111b21;text-align:left;">
+        🗑️ Delete for me only
+        <div style="font-size:0.78rem;color:#8696a0;font-weight:400;margin-top:2px;">Removes from your list. Other person keeps their copy.</div>
+      </button>
+      <button id="delBothSides" style="width:100%;padding:12px;border-radius:10px;background:#fff0f0;border:1px solid #ffcdd2;font-family:'Rajdhani',sans-serif;font-size:0.95rem;font-weight:600;cursor:pointer;color:#e53935;text-align:left;">
+        🗑️ Delete for everyone
+        <div style="font-size:0.78rem;color:#e53935;font-weight:400;margin-top:2px;">Removes chat and all messages for both sides.</div>
+      </button>
+      <button id="delCancel" style="width:100%;padding:10px;border-radius:10px;background:none;border:none;font-family:'Rajdhani',sans-serif;font-size:0.95rem;color:#8696a0;cursor:pointer;">Cancel</button>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  function closeOverlay() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+
+  overlay.querySelector('#delCancel').onclick = closeOverlay;
+  overlay.onclick = (e) => { if (e.target === overlay) closeOverlay(); };
+
+  // Delete for ME only
+  overlay.querySelector('#delMySide').onclick = async () => {
+    closeOverlay();
+    await _doChatDelete(chatId, false);
+  };
+
+  // Delete for BOTH sides
+  overlay.querySelector('#delBothSides').onclick = async () => {
+    closeOverlay();
+    await _doChatDelete(chatId, true);
+  };
+}
+
+async function _doChatDelete(chatId, both) {
+  // Close chat pane if open
   if (currentChatId === chatId) {
     closeChat();
     document.getElementById('emptyState').style.display = 'flex';
   }
-  // remove only from MY userChats — not the other person's
-  await db.ref(`userChats/${ME.uid}/${chatId}`).remove();
-  showToast('Chat deleted.');
+
+  // Always clear MY localStorage cache for this chat
+  localStorage.removeItem('sc_msgs_' + chatId);
+
+  // Remove from MY userChats
+  await db.ref('userChats/' + ME.uid + '/' + chatId).remove();
+
+  if (both) {
+    // Get the other user's uid from chatsCache
+    const chat = chatsCache[chatId];
+    const otherUid = chat ? chat.otherUid : null;
+
+    // Delete all messages in this chat
+    await db.ref('messages/' + chatId).remove();
+
+    // Remove from OTHER person's userChats too
+    if (otherUid) {
+      await db.ref('userChats/' + otherUid + '/' + chatId).remove();
+    }
+
+    // Clear their localStorage cache too (won't work cross-device
+    // but good to clear locally in case they're on same device)
+    localStorage.removeItem('sc_msgs_' + chatId);
+
+    showToast('Chat deleted for everyone.');
+  } else {
+    showToast('Chat deleted for you.');
+  }
 }
 
 // ═══════════════════════════════════════════════
