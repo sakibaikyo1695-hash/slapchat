@@ -995,6 +995,8 @@ function clearOfflineSession() {
 }
 
 function isOnline() {
+  // On file:// (APK), navigator.onLine is always true — trust it
+  // On web, use standard check
   return navigator.onLine !== false;
 }
 
@@ -1061,13 +1063,14 @@ function bootWithOfflineSession(session) {
 //  onAuthStateChanged will see _offlineBooted=true and skip.
 // ════════════════════════════════════════════
 (function() {
+  // On APK (file://), always use Firebase Auth — skip offline boot
+  if (location.protocol === 'file:') return;
+
   var cachedSession = loadOfflineSession();
   if (!isOnline()) {
     if (cachedSession) {
-      // Offline + cache found — boot NOW before Firebase fires
       bootWithOfflineSession(cachedSession);
     } else {
-      // Offline, no cache — show login, let user know
       hide('loadingScreen');
       showAuthForm();
       setTimeout(function() {
@@ -1075,11 +1078,9 @@ function bootWithOfflineSession(session) {
       }, 100);
     }
   } else {
-    // Online — Firebase will handle it, but show "Restoring session" if cached
     if (cachedSession) {
       setMsg('Restoring session...', '');
     }
-    // Keep loading screen visible — onAuthStateChanged will remove it
   }
 })();
 
@@ -1187,34 +1188,54 @@ function switchTab(mode) {
 async function doAuth() {
   const email    = v('authEmail').trim();
   const password = v('authPassword');
-  if (!email || !password) { setMsg('Please fill all fields.','error'); return; }
+  if (!email || !password) { setMsg('Please fill all fields.', 'error'); return; }
+
+  // Disable button and show loading
+  const btn = document.getElementById('authBtn');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = authMode === 'login' ? 'SIGNING IN...' : 'CREATING...';
+  setMsg('', '');
 
   if (authMode === 'login') {
-    // No internet — try offline cache (exact SimpliFly pattern)
-    if (!isOnline()) {
+    if (!isOnline() && location.protocol !== 'file:') {
       var session = loadOfflineSession();
       if (session && session.email && session.email.toLowerCase() === email.toLowerCase()) {
         _offlineBooted = true;
+        btn.disabled = false; btn.textContent = origText;
         bootWithOfflineSession(session);
         return;
       }
+      btn.disabled = false; btn.textContent = origText;
       setMsg('No internet. Connect to internet for first-time login.', 'error');
       return;
     }
     try {
       await auth.signInWithEmailAndPassword(email, password);
-    } catch(e) { setMsg(friendlyError(e), 'error'); }
+      // onAuthStateChanged will take over — don't re-enable button
+    } catch(e) {
+      btn.disabled = false; btn.textContent = origText;
+      setMsg(friendlyError(e), 'error');
+    }
   } else {
     const name   = v('authName').trim();
-    const handle = v('authHandle').trim().toLowerCase().replace(/\s+/g,'');
-    if (!name || !handle) { setMsg('Please fill display name and handle.','error'); return; }
-    if (!/^[a-z0-9._-]{3,20}$/.test(handle)) { setMsg('Handle: 3-20 chars, letters/numbers/dots/dashes only.','error'); return; }
-
-    // check handle uniqueness
-    const hSnap = await db.ref(`handles/${handle}`).get();
-    if (hSnap.exists()) { setMsg('Handle already taken. Choose another.','error'); return; }
-
+    const handle = v('authHandle').trim().toLowerCase().replace(/\s+/g, '');
+    if (!name || !handle) {
+      btn.disabled = false; btn.textContent = origText;
+      setMsg('Please fill display name and handle.', 'error'); return;
+    }
+    if (!/^[a-z0-9._-]{3,20}$/.test(handle)) {
+      btn.disabled = false; btn.textContent = origText;
+      setMsg('Handle: 3-20 chars, letters/numbers/dots/dashes only.', 'error'); return;
+    }
     try {
+      setMsg('Checking handle...', '');
+      const hSnap = await db.ref('handles/' + handle).get();
+      if (hSnap.exists()) {
+        btn.disabled = false; btn.textContent = origText;
+        setMsg('Handle already taken. Choose another.', 'error'); return;
+      }
+      setMsg('Creating account...', '');
       const cred = await auth.createUserWithEmailAndPassword(email, password);
       const uid  = cred.user.uid;
       const profile = {
@@ -1222,11 +1243,15 @@ async function doAuth() {
         status: 'pending', role: 'user',
         joinedAt: Date.now(), photoURL: ''
       };
-      await db.ref(`users/${uid}`).set(profile);
-      await db.ref(`handles/${handle}`).set(uid);
+      await db.ref('users/' + uid).set(profile);
+      await db.ref('handles/' + handle).set(uid);
       ME = { ...profile, uid };
+      btn.disabled = false; btn.textContent = origText;
       showPending();
-    } catch(e) { setMsg(friendlyError(e), 'error'); }
+    } catch(e) {
+      btn.disabled = false; btn.textContent = origText;
+      setMsg(friendlyError(e), 'error');
+    }
   }
 }
 
@@ -2601,7 +2626,7 @@ function listenForIncomingMessages() {
 
 // ── SERVICE WORKER REGISTRATION ──
 // Register early so Firebase SDK scripts get cached on first visit
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   const base = location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '') + '/';
   navigator.serviceWorker.register(base + 'sw.js', { scope: base })
     .then(reg => {
