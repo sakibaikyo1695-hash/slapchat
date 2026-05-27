@@ -1192,35 +1192,43 @@ async function searchUsers(q) {
   const qLow = q.trim().toLowerCase();
   if (qLow.length < 1) { results.innerHTML = ''; return; }
   results.innerHTML = '<div style="color:var(--text3);font-size:0.82rem;padding:8px;">Searching...</div>';
-  const snap = await db.ref('users').get();
-  const out = [];
-  snap.forEach(child => {
-    const u = { uid: child.key, ...child.val() };
-    if (u.uid === ME.uid) return;                           // skip self
-    if (u.status === 'banned') return;                     // skip banned
-    const handle = (u.handle || '').toLowerCase();
-    const name   = (u.displayName || '').toLowerCase();
-    if (handle.includes(qLow) || name.includes(qLow)) out.push(u);
-  });
-  results.innerHTML = '';
-  if (!out.length) {
-    results.innerHTML = '<div style="color:var(--text3);font-size:0.85rem;padding:10px;">No users found. Make sure they are approved.</div>';
-    return;
+  try {
+    const snap = await db.ref('users').get();
+    if (!snap.exists()) {
+      results.innerHTML = '<div style="color:var(--text3);font-size:0.85rem;padding:10px;">No users in database yet.</div>';
+      return;
+    }
+    const out = [];
+    snap.forEach(child => {
+      const u = { uid: child.key, ...child.val() };
+      if (u.uid === ME.uid) return;
+      if (u.status === 'banned') return;
+      const handle = (u.handle || '').toLowerCase();
+      const name   = (u.displayName || '').toLowerCase();
+      if (handle.includes(qLow) || name.includes(qLow)) out.push(u);
+    });
+    results.innerHTML = '';
+    if (!out.length) {
+      results.innerHTML = '<div style="color:var(--text3);font-size:0.85rem;padding:10px;">No users found matching "' + q + '"</div>';
+      return;
+    }
+    out.slice(0,15).forEach(u => {
+      const div = document.createElement('div');
+      div.className = 'user-search-result';
+      const statusColor = u.status === 'approved' ? '#25d366' : '#f59e0b';
+      div.innerHTML = `
+        <div class="avatar" style="width:44px;height:44px;font-size:1rem;flex-shrink:0;">${avatarHTML(u)}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="u-name">${esc(u.displayName)}</div>
+          <div class="u-handle">@${esc(u.handle||'(no handle)')}</div>
+        </div>
+        <span style="font-size:0.72rem;color:${statusColor};font-weight:700;">${(u.status||'pending').toUpperCase()}</span>`;
+      div.onclick = () => startChat(u);
+      results.appendChild(div);
+    });
+  } catch(e) {
+    results.innerHTML = '<div style="color:#e53935;font-size:0.85rem;padding:10px;">Permission denied. Check Firebase rules.<br><small>' + e.message + '</small></div>';
   }
-  out.slice(0,15).forEach(u => {
-    const div = document.createElement('div');
-    div.className = 'user-search-result';
-    const statusColor = u.status === 'approved' ? '#25d366' : '#f59e0b';
-    div.innerHTML = `
-      <div class="avatar" style="width:44px;height:44px;font-size:1rem;flex-shrink:0;">${avatarHTML(u)}</div>
-      <div style="flex:1;min-width:0;">
-        <div class="u-name">${esc(u.displayName)}</div>
-        <div class="u-handle">@${esc(u.handle||'(no handle)')}</div>
-      </div>
-      <span style="font-size:0.72rem;color:${statusColor};font-weight:700;">${(u.status||'pending').toUpperCase()}</span>`;
-    div.onclick = () => startChat(u);
-    results.appendChild(div);
-  });
 }
 
 async function startChat(user) {
@@ -1329,9 +1337,19 @@ function aTab(filter) {
 }
 
 async function loadAdminUsers() {
-  const snap = await db.ref('users').get();
   const list = document.getElementById('adminUserList');
   list.innerHTML = '<div style="color:var(--text3);font-size:0.82rem;padding:6px;">Loading...</div>';
+  let snap;
+  try {
+    snap = await db.ref('users').get();
+  } catch(e) {
+    list.innerHTML = '<div style="color:#e53935;padding:10px;font-size:0.85rem;">Permission denied reading users.<br>Check Firebase rules.<br><small>' + e.message + '</small></div>';
+    return;
+  }
+  if (!snap.exists()) {
+    list.innerHTML = '<div style="color:var(--text3);padding:10px;">No users registered yet.</div>';
+    return;
+  }
   const rows = [];
   snap.forEach(child => {
     const u = { uid: child.key, ...child.val() };
