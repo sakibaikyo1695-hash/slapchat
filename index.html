@@ -670,10 +670,21 @@ input, textarea { font-family:var(--font); }
       </div>
     </div>
     <div class="profile-info-row">
-      <label>PROFILE PICTURE URL</label>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <label>PROFILE PICTURE</label>
+
+      <!-- Step guide -->
+      <div style="background:#f0faf5;border:1px solid #b2dfdb;border-radius:10px;padding:12px;font-size:0.82rem;color:#333;line-height:1.7;">
+        <div style="font-weight:700;color:#128c7e;margin-bottom:6px;">📷 How to set your photo (Imgur — free)</div>
+        <div>1. Open <a href="https://imgur.com/upload" target="_blank" style="color:#128c7e;font-weight:600;">imgur.com/upload</a> on your phone/laptop</div>
+        <div>2. Upload your photo there</div>
+        <div>3. After upload — <b>right-click the image → Copy image address</b></div>
+        <div>4. Paste that link below → your photo will appear</div>
+        <div style="margin-top:4px;color:#888;font-size:0.78rem;">⚠️ Google Photos and Google Drive links will NOT work due to browser security.</div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
         <input class="inp" id="profilePhotoURL" type="url"
-          placeholder="Paste a direct image URL (e.g. from Imgur)"
+          placeholder="Paste Imgur direct image link here..."
           oninput="previewAvatarURL(this.value)"
           style="flex:1;"/>
         <button onclick="clearAvatarURL()"
@@ -683,10 +694,7 @@ input, textarea { font-family:var(--font); }
           Clear
         </button>
       </div>
-      <div id="photoURLHelp" style="font-size:0.75rem;color:var(--text3);margin-top:4px;">
-        Upload your photo to <a href="https://imgur.com/upload" target="_blank"
-        style="color:var(--accent);">imgur.com</a> free → right-click image → Copy image address → paste here.
-      </div>
+      <div id="photoURLMsg" style="font-size:0.82rem;min-height:16px;margin-top:4px;"></div>
     </div>
     <div class="profile-info-row">
       <label>DISPLAY NAME</label>
@@ -1486,8 +1494,8 @@ async function saveProfile() {
   }
 
   const resolvedURL = resolveImageURL(photoURL);
-  if (resolvedURL === '__google_photos__') {
-    showToast('Google Photos links cannot be used. Please use Imgur.');
+  if (resolvedURL === '__blocked__') {
+    showToast('Google Photos/Drive links are blocked. Use Imgur.');
     return;
   }
   ME.displayName = name;
@@ -1501,51 +1509,52 @@ async function saveProfile() {
   // Force re-render chat list to show new avatar
   renderChatList(Object.values(chatsCache));
 }
-// Convert any share URL to a displayable image URL
 function resolveImageURL(url) {
   if (!url) return '';
-  // Google Photos share links — use proxy
-  if (url.includes('photos.google.com') || url.includes('photos.app.goo.gl')) {
-    // Can't directly embed Google Photos share links — show instruction
-    return '__google_photos__';
+  // Block known non-working sources
+  if (url.includes('photos.google.com') || url.includes('photos.app.goo.gl') ||
+      url.includes('drive.google.com') || url.includes('googleusercontent.com')) {
+    return '__blocked__';
   }
-  // Google Drive direct view link → convert to direct image
-  if (url.includes('drive.google.com/file/d/')) {
-    const match = url.match(/\/d\/([^/]+)/);
-    if (match) return `https://drive.google.com/uc?export=view&id=${match[1]}`;
-  }
-  // Already a direct image URL
   return url;
 }
 
 function previewAvatarURL(url) {
   const content = document.getElementById('profileAvatarContent');
-  if (!url || !url.startsWith('http')) {
+  const msgEl   = document.getElementById('photoURLMsg');
+  msgEl.textContent = '';
+
+  if (!url || url.trim() === '') {
     content.innerHTML = initials(ME.displayName);
     return;
   }
-
-  const resolved = resolveImageURL(url);
-
-  if (resolved === '__google_photos__') {
-    content.innerHTML = initials(ME.displayName);
-    showToast('Google Photos links cannot be used directly. Use Imgur instead.');
-    // Update the help text
-    document.getElementById('photoURLHelp').innerHTML =
-      '⚠️ Google Photos links do not work. Upload to <a href="https://imgur.com/upload" target="_blank" style="color:var(--accent);">Imgur.com</a> (free, free account) → right-click image → Copy Image Address → paste here.';
+  if (!url.startsWith('http')) {
+    msgEl.style.color = '#e53935';
+    msgEl.textContent = 'Must be a full URL starting with https://';
     return;
   }
+
+  const resolved = resolveImageURL(url.trim());
+  if (resolved === '__blocked__') {
+    content.innerHTML = initials(ME.displayName);
+    msgEl.style.color = '#e53935';
+    msgEl.textContent = 'Google Photos/Drive links are blocked by browser security. Use Imgur instead.';
+    return;
+  }
+
+  msgEl.style.color = '#128c7e';
+  msgEl.textContent = 'Loading preview...';
 
   const img = new Image();
-  img.crossOrigin = 'anonymous';
   img.onload = () => {
     content.innerHTML = `<img src="${resolved}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`;
-    // Auto-update the URL field with resolved URL
-    document.getElementById('profilePhotoURL').value = resolved;
+    msgEl.style.color = '#128c7e';
+    msgEl.textContent = '✓ Image loaded successfully!';
   };
   img.onerror = () => {
     content.innerHTML = initials(ME.displayName);
-    showToast('Cannot load this image. Try Imgur — it always works.');
+    msgEl.style.color = '#e53935';
+    msgEl.textContent = 'Cannot load this image. Make sure it is a direct Imgur link ending in .jpg or .png';
   };
   img.src = resolved;
 }
@@ -1553,6 +1562,7 @@ function previewAvatarURL(url) {
 function clearAvatarURL() {
   document.getElementById('profilePhotoURL').value = '';
   document.getElementById('profileAvatarContent').innerHTML = initials(ME.displayName);
+  document.getElementById('photoURLMsg').textContent = '';
 }
 function copyHandle() { navigator.clipboard.writeText(ME.handle); showToast('Handle copied!'); }
 
