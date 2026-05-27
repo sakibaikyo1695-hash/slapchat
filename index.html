@@ -1230,19 +1230,32 @@ async function doAuth() {
     }
     try {
       setMsg('Checking handle...', '');
-      const hSnap = await db.ref('handles/' + handle).get();
+      let hSnap;
+      try {
+        hSnap = await db.ref('handles/' + handle).get();
+      } catch(dbErr) {
+        btn.disabled = false; btn.textContent = origText;
+        setMsg('DB error: ' + dbErr.message, 'error'); return;
+      }
       if (hSnap.exists()) {
         btn.disabled = false; btn.textContent = origText;
         setMsg('Handle already taken. Choose another.', 'error'); return;
       }
       setMsg('Creating account...', '');
-      const cred = await auth.createUserWithEmailAndPassword(email, password);
+      let cred;
+      try {
+        cred = await auth.createUserWithEmailAndPassword(email, password);
+      } catch(authErr) {
+        btn.disabled = false; btn.textContent = origText;
+        setMsg('Auth error: ' + authErr.code + ' — ' + authErr.message, 'error'); return;
+      }
       const uid  = cred.user.uid;
       const profile = {
         email, displayName: name, handle,
         status: 'pending', role: 'user',
         joinedAt: Date.now(), photoURL: ''
       };
+      setMsg('Saving profile...', '');
       await db.ref('users/' + uid).set(profile);
       await db.ref('handles/' + handle).set(uid);
       ME = { ...profile, uid };
@@ -1250,7 +1263,7 @@ async function doAuth() {
       showPending();
     } catch(e) {
       btn.disabled = false; btn.textContent = origText;
-      setMsg(friendlyError(e), 'error');
+      setMsg('Error: ' + e.code + ' — ' + e.message, 'error');
     }
   }
 }
