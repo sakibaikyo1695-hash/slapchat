@@ -1232,92 +1232,88 @@ function closeChat() {
 // ═══════════════════════════════════════════════
 //  MESSAGES — LISTEN
 // ═══════════════════════════════════════════════
+let _msgRenderTimer = null;
+
 function listenMessages(chatId) {
-  if (msgsListener) msgsListener();
+  if (msgsListener) { msgsListener(); msgsListener = null; }
+  if (_msgRenderTimer) { clearTimeout(_msgRenderTimer); _msgRenderTimer = null; }
+
   const area = document.getElementById('messagesArea');
   area.innerHTML = '';
 
-  // Show cached messages instantly (offline support)
+  // Show cached messages immediately for instant offline display
   const msgCacheKey = 'sc_msgs_' + chatId;
   const cachedMsgs = localStorage.getItem(msgCacheKey);
   if (cachedMsgs) {
     try {
-      const msgs = JSON.parse(cachedMsgs);
-      area.innerHTML = '';
-      let lastDay = '';
-      msgs.forEach(msg => {
-        const day = dayLabel(msg.time);
-        if (day !== lastDay) {
-          lastDay = day;
-          const div = document.createElement('div');
-          div.className = 'msg-day-divider';
-          div.innerHTML = `<span>${day}</span>`;
-          area.appendChild(div);
-        }
-        try { area.appendChild(buildBubble(msg)); } catch(e) {}
-      });
-      area.scrollTop = area.scrollHeight;
+      renderMessages(JSON.parse(cachedMsgs), area);
     } catch(e) {}
   }
 
   const ref = db.ref(`messages/${chatId}`).orderByChild('time');
   msgsListener = ref.on('value', snap => {
-    area.innerHTML = '';
-    if (!snap || !snap.exists()) {
-      area.innerHTML = '<div style="text-align:center;color:var(--text3);padding:30px;font-size:0.85rem;">No messages yet. Say hello! 👋</div>';
-      return;
-    }
-    const msgsArray = [];
-    let lastDay = '';
-    snap.forEach(child => {
-      if (!child.val()) return;
-      const msg = { id: child.key, ...child.val() };
-      msgsArray.push(msg);
-      const day = dayLabel(msg.time);
-      if (day !== lastDay) {
-        lastDay = day;
-        const div = document.createElement('div');
-        div.className = 'msg-day-divider';
-        div.innerHTML = `<span>${day}</span>`;
-        area.appendChild(div);
+    // Debounce: wait 120ms before rendering so rapid sequential
+    // events (e.g. from updating delivered/read flags) only render once
+    if (_msgRenderTimer) clearTimeout(_msgRenderTimer);
+    _msgRenderTimer = setTimeout(() => {
+      _msgRenderTimer = null;
+      if (!snap || !snap.exists()) {
+        area.innerHTML = '<div style="text-align:center;color:var(--text3);padding:30px;font-size:0.85rem;">No messages yet. Say hello! 👋</div>';
+        return;
       }
-      try { area.appendChild(buildBubble(msg)); } catch(e) { console.warn('Bubble error:', e, msg); }
-    });
-    area.scrollTop = area.scrollHeight;
-    localStorage.setItem(msgCacheKey, JSON.stringify(msgsArray.slice(-100)));
+      const msgsArray = [];
+      snap.forEach(child => {
+        if (child.val()) msgsArray.push({ id: child.key, ...child.val() });
+      });
 
-    if (currentChatId === chatId) {
-      // Mark unread count as 0 in MY userChats
-      db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
+      renderMessages(msgsArray, area);
+      localStorage.setItem(msgCacheKey, JSON.stringify(msgsArray.slice(-100)));
 
-      // Mark all THEIR messages as delivered (their app sent them, we received)
-      // and as read (we have this chat open right now)
+      // Mark receipts AFTER render, not before — avoids triggering re-render loop
       const updates = {};
       msgsArray.forEach(msg => {
-        if (msg.senderUid !== ME.uid) {
-          // Mark delivered + read since we have chat open
+        if (msg.senderUid === ME.uid) return;
+        if (currentChatId === chatId) {
           if (!msg.delivered) updates[msg.id + '/delivered'] = true;
           if (!msg.read)      updates[msg.id + '/read']      = true;
+        } else {
+          if (!msg.delivered) updates[msg.id + '/delivered'] = true;
         }
       });
       if (Object.keys(updates).length > 0) {
         db.ref(`messages/${chatId}`).update(updates);
       }
-    } else {
-      // Chat not open — only mark as delivered (not read)
-      const updates = {};
-      msgsArray.forEach(msg => {
-        if (msg.senderUid !== ME.uid && !msg.delivered) {
-          updates[msg.id + '/delivered'] = true;
-        }
-      });
-      if (Object.keys(updates).length > 0) {
-        db.ref(`messages/${chatId}`).update(updates);
+      if (currentChatId === chatId) {
+        db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
       }
-    }
+    }, 120);
   }, err => {
     console.log('Offline — showing cached messages');
   });
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER MESSAGES INTO AREA
+// ═══════════════════════════════════════════════
+function renderMessages(msgsArray, area) {
+  const wasAtBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 60;
+  area.innerHTML = '';
+  let lastDay = '';
+  msgsArray.forEach(msg => {
+    const day = dayLabel(msg.time);
+    if (day !== lastDay) {
+      lastDay = day;
+      const div = document.createElement('div');
+      div.className = 'msg-day-divider';
+      div.innerHTML = `<span>${day}</span>`;
+      area.appendChild(div);
+    }
+    try { area.appendChild(buildBubble(msg)); } catch(e) { console.warn('Bubble error:', e); }
+  });
+  // Scroll to bottom only if user was already near bottom
+  if (wasAtBottom || msgsArray.length <= 10) {
+    area.scrollTop = area.scrollHeight;
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -1329,12 +1325,27 @@ function buildBubble(msg) {
   row.className = 'msg-row' + (mine ? ' mine' : '');
   row.dataset.id = msg.id;
 
-  // avatar (for others)
+  // avatar (for others) — use cached user data, show initials immediately
   const avDiv = document.createElement('div');
   avDiv.className = 'avatar-sm';
   if (!mine) {
     const u = allUsers[msg.senderUid] || {};
-    avDiv.innerHTML = u.photoURL ? `<img src="${u.photoURL}"/>` : initials(u.displayName || '?');
+    const displayName = u.displayName || msg.senderName || '?';
+    if (u.photoURL) {
+      avDiv.innerHTML = `<img src="${u.photoURL}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.outerHTML=decodeURIComponent('${encodeURIComponent(initials(displayName))}')"/>`;
+    } else {
+      avDiv.textContent = initials(displayName);
+      // If user not loaded yet, load and update
+      if (!u.displayName) {
+        getUser(msg.senderUid).then(loaded => {
+          if (loaded && loaded.displayName) {
+            avDiv.innerHTML = loaded.photoURL
+              ? `<img src="${loaded.photoURL}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`
+              : initials(loaded.displayName);
+          }
+        });
+      }
+    }
   }
 
   const wrap = document.createElement('div');
