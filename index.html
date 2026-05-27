@@ -2,13 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
 <title>SlapChat</title>
 <meta name="theme-color" content="#128c7e"/>
 <link rel="manifest" href="manifest.json"/>
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png"/>
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
 <link rel="apple-touch-icon" href="icon-192.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="SlapChat"/>
+<meta name="mobile-web-app-capable" content="yes"/>
 
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -409,10 +413,71 @@ input, textarea { font-family:var(--font); }
 /* ─── MOBILE RESPONSIVE ─── */
 @media (max-width: 700px) {
   :root { --sidebar-w: 100vw; }
-  #sidebar { position:absolute; z-index:10; left:0; top:0; bottom:0; }
-  #chatWindow { position:absolute; inset:0; transform:translateX(100%); transition:transform .3s; }
-  #chatWindow.open { transform:translateX(0); }
-  .chat-header .back-btn { display:flex; }
+
+  /* Safe area padding for notch/home bar phones */
+  #app {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Sidebar = full screen chat list */
+  #sidebar {
+    position: fixed;
+    z-index: 10;
+    left: 0; top: 0; bottom: 0; right: 0;
+    width: 100vw;
+    transform: translateX(0);
+    transition: transform .3s ease;
+  }
+  #sidebar.hidden-mobile {
+    transform: translateX(-100%);
+  }
+
+  /* Chat window slides in from right */
+  #chatWindow {
+    position: fixed;
+    inset: 0;
+    transform: translateX(100%);
+    transition: transform .3s ease;
+    z-index: 20;
+  }
+  #chatWindow.open {
+    transform: translateX(0);
+  }
+
+  /* Show back button on mobile */
+  .chat-header .back-btn { display:flex !important; }
+
+  /* Input bar safe area */
+  .input-bar {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  /* Sidebar header safe area */
+  .sidebar-header {
+    padding-top: calc(14px + env(safe-area-inset-top));
+  }
+
+  /* Chat header safe area */
+  .chat-header {
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
+
+  /* Larger touch targets on mobile */
+  .icon-btn { width:42px; height:42px; }
+  .send-btn  { width:48px; height:48px; }
+  .chat-item { padding:14px 16px; }
+  .bubble { padding:10px 14px; }
+  .msg-text { font-size:1rem; }
+
+  /* Full width bubbles on mobile */
+  .bubble-wrap { max-width:80%; }
+
+  /* Auth screen safe area */
+  #authScreen {
+    padding-top: calc(24px + env(safe-area-inset-top));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
 }
 
 /* ─── TYPING INDICATOR ─── */
@@ -665,6 +730,8 @@ const FIREBASE_CONFIG = {
 firebase.initializeApp(FIREBASE_CONFIG);
 const auth     = firebase.auth();
 const db       = firebase.database();
+// Keep user logged in forever until they explicitly sign out
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
 // ═══════════════════════════════════════════════
 //  STATE
@@ -844,10 +911,14 @@ async function openChat(chatId, otherUid) {
   document.getElementById('headerAvatar').innerHTML = avatarHTML(other);
   document.getElementById('headerName').textContent = other.displayName;
 
-  hide('emptyState');
+  document.getElementById('emptyState').style.display = 'none';
   const pane = document.getElementById('activeChatPane');
   pane.style.display = 'flex'; pane.style.flexDirection = 'column';
   document.getElementById('chatWindow').classList.add('open');
+  // On mobile: hide sidebar, show chat
+  if (window.innerWidth <= 700) {
+    document.getElementById('sidebar').classList.add('hidden-mobile');
+  }
 
   // mark as read
   db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
@@ -867,6 +938,10 @@ function closeChat() {
   document.getElementById('chatWindow').classList.remove('open');
   currentChatId = null;
   if (msgsListener) { msgsListener(); msgsListener = null; }
+  // On mobile: slide back to sidebar
+  if (window.innerWidth <= 700) {
+    document.getElementById('sidebar').classList.remove('hidden-mobile');
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -1541,6 +1616,16 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.warn('SW registration failed:', err));
   });
 }
+
+// ── ANDROID/BROWSER BACK BUTTON ──
+window.addEventListener('popstate', () => {
+  if (window.innerWidth <= 700 && currentChatId) {
+    closeChat();
+    history.pushState(null, '', location.href); // keep stack alive
+  }
+});
+// Push initial state so back button works
+history.pushState(null, '', location.href);
 </script>
 </body>
 </html>
