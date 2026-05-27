@@ -831,6 +831,7 @@ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 let ME = null;               // current user profile from DB
 let currentChatId = null;    // active conversation key
 let currentOther  = null;    // other user's uid
+let chatSearchQuery = '';    // current chat search filter
 let chatsListener = null;
 let msgsListener  = null;
 let presenceRef   = null;
@@ -1149,13 +1150,24 @@ async function renderChatList(chats) {
       <div class="chat-delete-btn" title="Delete chat" onclick="deleteChat('${chatId}','${esc(other.displayName)}')">🗑️</div>`;
     list.appendChild(div);
   }
+  // Re-apply any active search filter after render
+  applySearchFilter();
 }
 
 function filterChats(q) {
+  chatSearchQuery = q.trim().toLowerCase();
+  applySearchFilter();
+}
+
+function applySearchFilter() {
+  const q = chatSearchQuery;
   const items = document.querySelectorAll('.chat-item');
   items.forEach(item => {
-    const name = item.querySelector('.chat-name').textContent.toLowerCase();
-    item.style.display = name.includes(q.toLowerCase()) ? '' : 'none';
+    if (!q) { item.style.display = ''; return; }
+    const name    = (item.querySelector('.chat-name')?.textContent    || '').toLowerCase();
+    const preview = (item.querySelector('.chat-preview')?.textContent || '').toLowerCase();
+    const matches = name.includes(q) || preview.includes(q);
+    item.style.display = matches ? '' : 'none';
   });
 }
 
@@ -1637,6 +1649,10 @@ async function startChat(user) {
   await db.ref(`userChats/${ME.uid}/${chatId}`).update({ chatId, otherUid: user.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
   await db.ref(`userChats/${user.uid}/${chatId}`).update({ chatId, otherUid: ME.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
   closeModal('newChatModal');
+  // Clear search so new chat appears in list
+  const searchInput = document.getElementById('chatSearch');
+  if (searchInput) searchInput.value = '';
+  chatSearchQuery = '';
   openChat(chatId, user.uid);
 }
 
