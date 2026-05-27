@@ -14,10 +14,42 @@
 <meta name="apple-mobile-web-app-title" content="SlapChat"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<!-- Firebase SDK — loaded from cache when offline -->
+<script>
+// If Firebase SDK fails to load (not yet cached offline),
+// boot from localStorage session immediately
+window._firebaseLoadErrors = 0;
+window._firebaseScriptError = function() {
+  window._firebaseLoadErrors++;
+  if (window._firebaseLoadErrors >= 1) {
+    // SDK failed — try pure offline boot
+    document.getElementById('loadingScreen').innerHTML =
+      '<div style="font-family:Orbitron,sans-serif;font-size:1.2rem;color:#128c7e;letter-spacing:3px;margin-bottom:16px;">SLAPCHAT</div>' +
+      '<div style="color:#e53935;font-size:0.85rem;max-width:280px;text-align:center;line-height:1.6;">' +
+      '⚠ Cannot load app scripts.<br>Please connect to internet once<br>to cache the app, then use offline.' +
+      '</div>';
+    // Try offline session boot anyway (pure localStorage, no Firebase)
+    var OFFLINE_KEY = 'slapchat_offline_session_v1';
+    try {
+      var raw = localStorage.getItem(OFFLINE_KEY);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s && s.status === 'approved') {
+          document.getElementById('loadingScreen').innerHTML =
+            '<div style="font-family:Orbitron,sans-serif;font-size:1.2rem;color:#128c7e;letter-spacing:3px;">SLAPCHAT</div>' +
+            '<div style="color:#f59e0b;font-size:0.82rem;margin-top:8px;">⚠ Limited offline mode</div>';
+        }
+      }
+    } catch(e) {}
+  }
+};
+</script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"
+        onerror="window._firebaseScriptError()"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"
+        onerror="window._firebaseScriptError()"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"
+        onerror="window._firebaseScriptError()"></script>
 
 <style>
 /* ═══════════════════════════════════════════════
@@ -2274,15 +2306,16 @@ function listenForIncomingMessages() {
 }
 
 // ── SERVICE WORKER REGISTRATION ──
+// Register early so Firebase SDK scripts get cached on first visit
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    // Auto-detect base path — works on GitHub Pages AND locally
-    const base = location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '') + '/';
-    const swPath = base + 'sw.js';
-    navigator.serviceWorker.register(swPath, { scope: base })
-      .then(reg => console.log('SW registered, scope:', reg.scope))
-      .catch(err => console.warn('SW failed:', err));
-  });
+  const base = location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '') + '/';
+  navigator.serviceWorker.register(base + 'sw.js', { scope: base })
+    .then(reg => {
+      console.log('SW registered, scope:', reg.scope);
+      // Force the new SW to activate immediately (clears old cache)
+      if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    })
+    .catch(err => console.warn('SW failed:', err));
 }
 
 // ── KEYBOARD / VIEWPORT HANDLING (mobile) ──
