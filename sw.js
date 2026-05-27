@@ -1,19 +1,27 @@
 // ═══════════════════════════════════════════════
-//  SLAPCHAT SERVICE WORKER v7
-//  Caches the app shell so it loads even when offline
+//  SLAPCHAT SERVICE WORKER v8
+//  CRITICAL: Caches Firebase SDK scripts so app
+//  works completely offline after first load
 // ═══════════════════════════════════════════════
-const CACHE = 'slapchat-v7';
+const CACHE = 'slapchat-v8';
 const BASE  = self.registration.scope;
 
+// ALL files needed to run the app offline
+// Including Firebase SDK from gstatic (critical!)
 const SHELL = [
   BASE + 'index.html',
   BASE + 'manifest.json',
   BASE + 'icon-192.png',
   BASE + 'icon-512.png',
+  // Firebase SDK scripts — MUST be cached for offline
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js',
+  // Google Fonts
+  'https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap',
 ];
 
-// INSTALL — cache every shell file individually
-// Use no-cache fetch so we always get fresh files on install
+// INSTALL
 self.addEventListener('install', event => {
   self.skipWaiting();
   event.waitUntil(
@@ -21,15 +29,19 @@ self.addEventListener('install', event => {
       Promise.allSettled(
         SHELL.map(url =>
           fetch(url, { cache: 'no-cache' })
-            .then(r => { if (r && r.ok) return cache.put(url, r); })
-            .catch(() => {})
+            .then(r => {
+              if (r && r.ok) {
+                return cache.put(url, r);
+              }
+            })
+            .catch(e => console.log('Cache miss (will retry):', url))
         )
       )
     )
   );
 });
 
-// ACTIVATE — remove old cache versions
+// ACTIVATE
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
@@ -40,66 +52,52 @@ self.addEventListener('activate', event => {
   );
 });
 
-// FETCH — serve shell from cache, pass Firebase through
+// FETCH
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
-
   const url = event.request.url;
-
-  // Skip non-http (chrome-extension, data:, blob:)
   if (!url.startsWith('http')) return;
 
-  // NEVER intercept Firebase, Google APIs — must always be live
+  // Firebase REALTIME DATA — never cache, always live
+  // (auth tokens, database reads/writes must be fresh)
   if (
-    url.includes('firebaseio.com')      ||
-    url.includes('firebaseapp.com')     ||
-    url.includes('identitytoolkit')     ||
-    url.includes('securetoken')         ||
-    url.includes('googleapis.com')      ||
-    url.includes('gstatic.com')         ||
+    url.includes('firebaseio.com')   ||
+    url.includes('identitytoolkit')  ||
+    url.includes('securetoken')      ||
     url.includes('firebasestorage')
   ) return;
 
-  // Navigation (page load) — cache first, network fallback
-  // This is what makes the app open offline
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      caches.match(BASE + 'index.html').then(cached => {
-        if (cached) {
-          // Serve from cache immediately (offline works)
-          // Also fetch fresh copy in background for next time
-          fetch(event.request)
-            .then(r => {
-              if (r && r.ok) {
-                caches.open(CACHE).then(c => c.put(event.request, r));
-              }
-            }).catch(() => {});
-          return cached;
-        }
-        // Not cached yet — fetch from network
-        return fetch(event.request).then(r => {
-          if (r && r.ok) {
-            const clone = r.clone();
-            caches.open(CACHE).then(c => c.put(event.request, clone));
-          }
-          return r;
-        });
-      })
-    );
-    return;
-  }
+  // Firebase AUTH app check — pass through
+  if (url.includes('firebaseapp.com') && url.includes('/__/auth/')) return;
 
-  // Static assets (icons, manifest) — cache first
+  // EVERYTHING ELSE: cache-first (SDK, app shell, fonts, icons)
+  // This includes gstatic.com Firebase SDK files
   event.respondWith(
     caches.match(event.request).then(cached => {
-      if (cached) return cached;
+      if (cached) {
+        // Serve from cache, update in background
+        fetch(event.request)
+          .then(r => {
+            if (r && r.ok) {
+              caches.open(CACHE).then(c => c.put(event.request, r));
+            }
+          }).catch(() => {});
+        return cached;
+      }
+      // Not in cache — fetch and cache it
       return fetch(event.request).then(r => {
-        if (r && r.ok && r.type !== 'opaque') {
+        if (r && r.ok) {
           const clone = r.clone();
           caches.open(CACHE).then(c => c.put(event.request, clone));
         }
         return r;
-      }).catch(() => new Response('', { status: 503 }));
+      }).catch(() => {
+        // Offline and not cached — for navigation return cached index
+        if (event.request.mode === 'navigate') {
+          return caches.match(BASE + 'index.html');
+        }
+        return new Response('', { status: 503 });
+      });
     })
   );
 });
