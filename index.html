@@ -1229,41 +1229,71 @@ async function doAuth() {
       setMsg('Handle: 3-20 chars, letters/numbers/dots/dashes only.', 'error'); return;
     }
     try {
-      setMsg('Checking handle...', '');
-      let hSnap;
-      try {
-        hSnap = await db.ref('handles/' + handle).get();
-      } catch(dbErr) {
-        btn.disabled = false; btn.textContent = origText;
-        setMsg('DB error: ' + dbErr.message, 'error'); return;
+      // On APK (file://), skip pre-auth handle check — do it after login
+      // because Firebase rules need authenticated user even for public reads
+      const isAPK = location.protocol === 'file:';
+
+      if (!isAPK) {
+        // Web: check handle uniqueness BEFORE creating account
+        setMsg('Checking handle...', '');
+        try {
+          const hSnap = await db.ref('handles/' + handle).get();
+          if (hSnap.exists()) {
+            btn.disabled = false; btn.textContent = origText;
+            setMsg('Handle already taken. Choose another.', 'error'); return;
+          }
+        } catch(dbErr) {
+          btn.disabled = false; btn.textContent = origText;
+          setMsg('DB error: ' + dbErr.message, 'error'); return;
+        }
       }
-      if (hSnap.exists()) {
-        btn.disabled = false; btn.textContent = origText;
-        setMsg('Handle already taken. Choose another.', 'error'); return;
-      }
+
+      // Create Firebase Auth account
       setMsg('Creating account...', '');
       let cred;
       try {
         cred = await auth.createUserWithEmailAndPassword(email, password);
       } catch(authErr) {
         btn.disabled = false; btn.textContent = origText;
-        setMsg('Auth error: ' + authErr.code + ' — ' + authErr.message, 'error'); return;
+        setMsg(friendlyError(authErr), 'error'); return;
       }
-      const uid  = cred.user.uid;
+
+      const uid = cred.user.uid;
+
+      if (isAPK) {
+        // APK: NOW check handle (user is authenticated, rules allow it)
+        setMsg('Checking handle...', '');
+        try {
+          const hSnap = await db.ref('handles/' + handle).get();
+          if (hSnap.exists()) {
+            // Handle taken — delete the auth account we just made
+            await cred.user.delete();
+            btn.disabled = false; btn.textContent = origText;
+            setMsg('Handle already taken. Choose another.', 'error'); return;
+          }
+        } catch(dbErr) {
+          await cred.user.delete();
+          btn.disabled = false; btn.textContent = origText;
+          setMsg('DB error: ' + dbErr.message, 'error'); return;
+        }
+      }
+
+      // Save profile to database
+      setMsg('Saving profile...', '');
       const profile = {
         email, displayName: name, handle,
         status: 'pending', role: 'user',
         joinedAt: Date.now(), photoURL: ''
       };
-      setMsg('Saving profile...', '');
       await db.ref('users/' + uid).set(profile);
       await db.ref('handles/' + handle).set(uid);
       ME = { ...profile, uid };
       btn.disabled = false; btn.textContent = origText;
       showPending();
+
     } catch(e) {
       btn.disabled = false; btn.textContent = origText;
-      setMsg('Error: ' + e.code + ' — ' + e.message, 'error');
+      setMsg('Error: ' + (e.code || e.message), 'error');
     }
   }
 }
