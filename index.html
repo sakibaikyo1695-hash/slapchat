@@ -414,10 +414,21 @@ input, textarea { font-family:var(--font); }
 @media (max-width: 700px) {
   :root { --sidebar-w: 100vw; }
 
+  /* Lock the entire app to viewport — prevents resize on keyboard open */
+  html, body {
+    height: 100%;
+    height: -webkit-fill-available;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+  }
+
   /* Safe area padding for notch/home bar phones */
   #app {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
+    height: 100%;
+    height: -webkit-fill-available;
   }
 
   /* Sidebar = full screen chat list */
@@ -440,9 +451,25 @@ input, textarea { font-family:var(--font); }
     transform: translateX(100%);
     transition: transform .3s ease;
     z-index: 20;
+    display: flex;
+    flex-direction: column;
+    /* Use dvh (dynamic viewport height) so layout adjusts with keyboard */
+    height: 100dvh;
   }
   #chatWindow.open {
     transform: translateX(0);
+  }
+  /* Messages area fills all remaining space above input */
+  #chatWindow #messagesArea {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Input bar always stays at bottom above keyboard */
+  #chatWindow .input-bar {
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
   }
 
   /* Show back button on mobile */
@@ -1127,6 +1154,9 @@ async function sendMessage() {
   const text = v('msgInput').trim();
   if (!text && !replyTarget) return;
   if (!currentChatId) return;
+  // Keep focus on input after sending (prevents keyboard dismiss on mobile)
+  const inp = document.getElementById('msgInput');
+  inp.focus();
 
   const msg = {
     senderUid:  ME.uid,
@@ -1146,8 +1176,13 @@ async function sendMessage() {
   const ref = db.ref(`messages/${currentChatId}`).push();
   await ref.set(msg);
   clearReply();
-  document.getElementById('msgInput').value = '';
-  autoResize(document.getElementById('msgInput'));
+  const msgInp = document.getElementById('msgInput');
+  msgInp.value = '';
+  autoResize(msgInp);
+  // Refocus so keyboard stays up on mobile
+  if (window.innerWidth <= 700) {
+    setTimeout(() => { msgInp.focus(); }, 50);
+  }
 
   // update userChats for both sides
   const summary = { lastMsg: text || '📷', lastTime: msg.time, chatId: currentChatId };
@@ -1774,6 +1809,42 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.warn('SW failed:', err));
   });
 }
+
+// ── KEYBOARD / VIEWPORT HANDLING (mobile) ──
+// When keyboard opens on mobile, scroll messages to bottom
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    if (window.innerWidth > 700) return;
+    const area = document.getElementById('messagesArea');
+    if (area) {
+      setTimeout(() => { area.scrollTop = area.scrollHeight; }, 80);
+    }
+  });
+}
+
+// Prevent whole page scroll when input is focused on iOS
+document.addEventListener('focusin', e => {
+  if (e.target === document.getElementById('msgInput')) {
+    if (window.innerWidth > 700) return;
+    setTimeout(() => {
+      const area = document.getElementById('messagesArea');
+      if (area) area.scrollTop = area.scrollHeight;
+    }, 300);
+  }
+});
+
+// Only blur (dismiss keyboard) when tapping the MESSAGES AREA, not the bubble itself
+document.addEventListener('DOMContentLoaded', () => {
+  const area = document.getElementById('messagesArea');
+  if (area) {
+    area.addEventListener('click', e => {
+      // If tap is directly on the area background (not a bubble), dismiss keyboard
+      if (e.target === area) {
+        document.getElementById('msgInput').blur();
+      }
+    });
+  }
+});
 
 // ── ANDROID/BROWSER BACK BUTTON ──
 window.addEventListener('popstate', () => {
