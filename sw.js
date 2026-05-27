@@ -1,10 +1,8 @@
 // ═══════════════════════════════════════════════
-//  SLAPCHAT SERVICE WORKER v4
+//  SLAPCHAT SERVICE WORKER v5
 // ═══════════════════════════════════════════════
-const CACHE = 'slapchat-v4';
-
-// Detect base path dynamically
-const BASE = self.registration.scope; // e.g. https://user.github.io/slapchat/
+const CACHE = 'slapchat-v5';
+const BASE  = self.registration.scope;
 
 const SHELL = [
   BASE,
@@ -14,21 +12,23 @@ const SHELL = [
   BASE + 'icon-512.png',
 ];
 
-// INSTALL — cache shell files one by one (don't fail if one is missing)
+// INSTALL
 self.addEventListener('install', event => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE).then(cache =>
-      Promise.allSettled(SHELL.map(url =>
-        fetch(url).then(r => {
-          if (r.ok) return cache.put(url, r);
-        }).catch(() => {})
-      ))
+      Promise.allSettled(
+        SHELL.map(url =>
+          fetch(url, { cache: 'no-cache' })
+            .then(r => { if (r.ok) cache.put(url, r); })
+            .catch(() => {})
+        )
+      )
     )
   );
 });
 
-// ACTIVATE — delete old caches
+// ACTIVATE
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
@@ -43,7 +43,7 @@ self.addEventListener('fetch', event => {
 
   const url = event.request.url;
 
-  // Never intercept Firebase or Google APIs — must always be live
+  // Never intercept Firebase / Google auth APIs
   if (
     url.includes('firebaseio.com') ||
     url.includes('firebaseapp.com') ||
@@ -56,19 +56,19 @@ self.addEventListener('fetch', event => {
     return; // Let browser handle — no respondWith
   }
 
-  // For navigation (page load) — network first, cache fallback
+  // Navigation requests — network first, cache fallback
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
-        .then(r => {
-          // Cache fresh copy
-          if (r && r.ok) {
-            caches.open(CACHE).then(c => c.put(event.request, r.clone()));
+        .then(response => {
+          if (response && response.ok) {
+            // Clone BEFORE any consumption
+            const toCache = response.clone();
+            caches.open(CACHE).then(c => c.put(event.request, toCache));
           }
-          return r;
+          return response;
         })
         .catch(() =>
-          // Offline — serve cached index
           caches.match(BASE + 'index.html')
             .then(r => r || caches.match(BASE))
         )
@@ -76,16 +76,21 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // For assets — cache first, network fallback
+  // Static assets — cache first, network fallback
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
-      return fetch(event.request).then(r => {
-        if (r && r.ok && r.type !== 'opaque') {
-          caches.open(CACHE).then(c => c.put(event.request, r.clone()));
-        }
-        return r;
-      }).catch(() => new Response('', { status: 408 }));
+
+      return fetch(event.request)
+        .then(response => {
+          if (response && response.ok && response.type !== 'opaque') {
+            // Clone BEFORE returning — critical fix for "body already used" error
+            const toCache = response.clone();
+            caches.open(CACHE).then(c => c.put(event.request, toCache));
+          }
+          return response;
+        })
+        .catch(() => new Response('Offline', { status: 503 }));
     })
   );
 });
