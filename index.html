@@ -439,6 +439,16 @@ input, textarea { font-family:var(--font); }
 
 
 
+/* chat info rows */
+.ci-row {
+  display:flex; align-items:flex-start; gap:14px; padding:10px 4px;
+  border-bottom:1px solid var(--border);
+}
+.ci-row:last-of-type { border-bottom:none; }
+.ci-icon { font-size:1.2rem; flex-shrink:0; margin-top:2px; }
+.ci-label { font-size:0.75rem; color:var(--text3); font-family:'Share Tech Mono',monospace; letter-spacing:0.5px; }
+.ci-value { font-size:0.95rem; color:var(--text); font-weight:600; margin-top:2px; }
+
 /* toast */
 #toast {
   position:fixed; bottom:90px; left:50%; transform:translateX(-50%) translateY(20px);
@@ -788,6 +798,81 @@ input, textarea { font-family:var(--font); }
 
     <div class="modal-actions">
       <button class="btn-sm" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);border-radius:8px;" onclick="closeModal('adminModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Chat Info Modal -->
+<div class="modal-overlay" id="chatInfoModal">
+  <div class="modal" style="max-width:400px;gap:0;padding:0;overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:#128c7e;padding:20px 20px 24px;text-align:center;position:relative;">
+      <button onclick="closeModal('chatInfoModal')"
+        style="position:absolute;top:12px;right:12px;color:rgba(255,255,255,0.8);font-size:1.3rem;background:none;border:none;cursor:pointer;">✕</button>
+      <div id="ciAvatar"
+        style="width:80px;height:80px;border-radius:50%;border:3px solid rgba(255,255,255,0.5);
+               display:flex;align-items:center;justify-content:center;
+               font-size:1.8rem;font-weight:700;color:#fff;background:rgba(255,255,255,0.2);
+               margin:0 auto 10px;overflow:hidden;"></div>
+      <div id="ciName" style="font-family:'Orbitron',sans-serif;font-size:1rem;color:#fff;letter-spacing:1px;"></div>
+      <div id="ciHandle" style="font-size:0.8rem;color:rgba(255,255,255,0.7);margin-top:3px;font-family:'Share Tech Mono',monospace;"></div>
+    </div>
+
+    <!-- Info rows -->
+    <div style="padding:16px;display:flex;flex-direction:column;gap:2px;">
+
+      <div style="font-size:0.72rem;color:var(--text3);font-family:'Share Tech Mono',monospace;letter-spacing:1px;padding:6px 0 4px;">CONTACT INFO</div>
+
+      <div class="ci-row">
+        <span class="ci-icon">✉️</span>
+        <div>
+          <div class="ci-label">Email</div>
+          <div class="ci-value" id="ciEmail"></div>
+        </div>
+      </div>
+
+      <div class="ci-row">
+        <span class="ci-icon">🟢</span>
+        <div>
+          <div class="ci-label">Status</div>
+          <div class="ci-value" id="ciStatus"></div>
+        </div>
+      </div>
+
+      <div class="ci-row">
+        <span class="ci-icon">💬</span>
+        <div>
+          <div class="ci-label">Total messages</div>
+          <div class="ci-value" id="ciMsgCount"></div>
+        </div>
+      </div>
+
+      <div class="ci-row">
+        <span class="ci-icon">📅</span>
+        <div>
+          <div class="ci-label">Chat started</div>
+          <div class="ci-value" id="ciStarted"></div>
+        </div>
+      </div>
+
+      <div class="ci-row">
+        <span class="ci-icon">🕐</span>
+        <div>
+          <div class="ci-label">Last message</div>
+          <div class="ci-value" id="ciLastMsg"></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="border-top:1px solid var(--border);margin-top:10px;padding-top:12px;display:flex;flex-direction:column;gap:8px;">
+        <button onclick="closeModal('chatInfoModal');setTimeout(()=>deleteChat(currentChatId,document.getElementById('ciName').textContent),100)"
+          style="width:100%;padding:11px;border-radius:10px;background:#fff0f0;border:1px solid #ffcdd2;
+                 color:#e53935;font-family:'Rajdhani',sans-serif;font-size:0.95rem;font-weight:700;cursor:pointer;">
+          🗑️ Delete Chat
+        </button>
+      </div>
+
     </div>
   </div>
 </div>
@@ -2309,7 +2394,7 @@ function esc(s) { const d=document.createElement('div'); d.textContent=s||''; re
 function show(id) {
   const el = document.getElementById(id);
   // Restore correct display type based on element
-  const flexIds = ['app','activeChatPane','replyPreview','newChatModal','profileModal','adminModal'];
+  const flexIds = ['app','activeChatPane','replyPreview','newChatModal','profileModal','adminModal','chatInfoModal'];
   el.style.display = flexIds.includes(id) ? 'flex' : '';
 }
 function hide(id) { document.getElementById(id).style.display='none'; }
@@ -2360,7 +2445,81 @@ function friendlyError(e) {
   const m = { 'auth/user-not-found':'No account found with this email.', 'auth/wrong-password':'Incorrect password.', 'auth/email-already-in-use':'Email already registered.', 'auth/weak-password':'Password must be at least 6 characters.', 'auth/invalid-email':'Invalid email address.' };
   return m[e.code] || e.message;
 }
-function showInfo() { showToast('Chat info coming soon.'); }
+async function showInfo() {
+  if (!currentChatId || !currentOther) return;
+
+  openModal('chatInfoModal');
+
+  // Load other user's profile
+  const other = await getUser(currentOther);
+  const displayName = other.displayName || 'Unknown';
+
+  // Avatar
+  const avEl = document.getElementById('ciAvatar');
+  if (other.photoURL) {
+    avEl.innerHTML = `<img src="${other.photoURL}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`;
+  } else {
+    avEl.textContent = initials(displayName);
+  }
+
+  document.getElementById('ciName').textContent    = displayName;
+  document.getElementById('ciHandle').textContent  = other.handle ? '@' + other.handle : '';
+  document.getElementById('ciEmail').textContent   = other.email  || '—';
+
+  // Presence / status
+  const presEl = document.getElementById('ciStatus');
+  presEl.textContent = 'Loading...';
+  if (isOnline()) {
+    try {
+      const pSnap = await db.ref('presence/' + currentOther).get();
+      const p = pSnap.val() || {};
+      presEl.textContent = p.online ? '🟢 Online now' : (p.lastSeen ? 'Last seen ' + timeLabel(p.lastSeen) : 'Offline');
+    } catch(e) { presEl.textContent = 'Offline'; }
+  } else {
+    presEl.textContent = 'Offline (you are offline)';
+  }
+
+  // Message count + first message date
+  const msgCountEl = document.getElementById('ciMsgCount');
+  const startedEl  = document.getElementById('ciStarted');
+  const lastMsgEl  = document.getElementById('ciLastMsg');
+
+  // Try localStorage cache first
+  const cached = localStorage.getItem('sc_msgs_' + currentChatId);
+  if (cached) {
+    try {
+      const msgs = JSON.parse(cached);
+      msgCountEl.textContent = msgs.length + (msgs.length === 100 ? '+' : '') + ' messages';
+      if (msgs.length > 0) {
+        startedEl.textContent = new Date(msgs[0].time).toLocaleDateString([], { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+        lastMsgEl.textContent = timeLabel(msgs[msgs.length - 1].time) + ' — ' + (msgs[msgs.length - 1].text || '📷').slice(0, 40);
+      }
+    } catch(e) {}
+  }
+
+  // Also fetch live count if online
+  if (isOnline()) {
+    try {
+      const mSnap = await db.ref('messages/' + currentChatId).get();
+      if (mSnap.exists()) {
+        let count = 0, firstTime = Infinity, lastTime = 0, lastText = '';
+        mSnap.forEach(child => {
+          const m = child.val();
+          count++;
+          if (m.time < firstTime) firstTime = m.time;
+          if (m.time > lastTime)  { lastTime = m.time; lastText = m.text || '📷'; }
+        });
+        msgCountEl.textContent = count + ' messages';
+        if (firstTime !== Infinity) startedEl.textContent = new Date(firstTime).toLocaleDateString([], { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+        if (lastTime)  lastMsgEl.textContent  = timeLabel(lastTime) + ' — ' + lastText.slice(0, 40);
+      } else {
+        msgCountEl.textContent = '0 messages';
+        startedEl.textContent  = '—';
+        lastMsgEl.textContent  = '—';
+      }
+    } catch(e) {}
+  }
+}
 
 // close menus on outside click
 document.addEventListener('click', e => {
