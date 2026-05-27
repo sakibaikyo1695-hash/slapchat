@@ -163,6 +163,14 @@ input, textarea { font-family:var(--font); }
 .chat-name { font-weight:600; font-size:0.95rem; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .chat-preview { font-size:0.82rem; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
 .chat-right { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+.chat-item { position:relative; overflow:hidden; }
+.chat-item:hover .chat-delete-btn { opacity:1; }
+.chat-delete-btn {
+  opacity:0; position:absolute; right:0; top:0; bottom:0;
+  background:#e53935; color:#fff; width:64px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.2rem; transition:opacity .2s; cursor:pointer; flex-shrink:0;
+}
 .chat-time { font-size:0.75rem; color:var(--text3); white-space:nowrap; }
 .unread-badge {
   background:var(--green); color:#fff; border-radius:50%;
@@ -570,6 +578,12 @@ input, textarea { font-family:var(--font); }
       <button class="btn-sm btn-accent" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);" onclick="closeModal('profileModal')">Cancel</button>
       <button class="btn-sm btn-primary" style="border-radius:8px;padding:8px 20px;" onclick="saveProfile()">SAVE</button>
     </div>
+    <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;">
+      <button onclick="deleteMyAccount()" style="width:100%;padding:11px;border-radius:10px;background:#fff0f0;border:1px solid #ffcdd2;color:#e53935;font-family:var(--font);font-size:0.95rem;font-weight:700;cursor:pointer;transition:background .2s;">
+        🗑️ DELETE MY ACCOUNT PERMANENTLY
+      </button>
+      <div style="font-size:0.75rem;color:var(--text3);text-align:center;margin-top:6px;">This will erase your profile, handle, and all your data from Firebase. Cannot be undone.</div>
+    </div>
   </div>
 </div>
 
@@ -798,7 +812,9 @@ async function renderChatList(chats) {
     const unread = (c.unread || 0);
     const div = document.createElement('div');
     div.className = 'chat-item' + (currentChatId === c.chatId ? ' active' : '');
-    div.onclick = () => openChat(c.chatId, c.otherUid);
+    const chatId  = c.chatId;
+    const otherUid = c.otherUid;
+    div.onclick = (e) => { if (!e.target.closest('.chat-delete-btn')) openChat(chatId, otherUid); };
     div.innerHTML = `
       <div class="avatar">${avatarHTML(other)}${presence.online ? '<div class="online-dot"></div>' : ''}</div>
       <div class="chat-meta">
@@ -808,7 +824,8 @@ async function renderChatList(chats) {
       <div class="chat-right">
         <div class="chat-time">${timeLabel(c.lastTime)}</div>
         ${unread > 0 ? `<div class="unread-badge">${unread}</div>` : ''}
-      </div>`;
+      </div>
+      <div class="chat-delete-btn" title="Delete chat" onclick="deleteChat('${chatId}','${esc(other.displayName)}')">🗑️</div>`;
     list.appendChild(div);
   }
 }
@@ -1172,24 +1189,38 @@ function openNewChatModal() { openModal('newChatModal'); document.getElementById
 
 async function searchUsers(q) {
   const results = document.getElementById('userSearchResults');
-  if (q.length < 2) { results.innerHTML = ''; return; }
-  const snap = await db.ref('users').orderByChild('handle').get();
+  const qLow = q.trim().toLowerCase();
+  if (qLow.length < 1) { results.innerHTML = ''; return; }
+  results.innerHTML = '<div style="color:var(--text3);font-size:0.82rem;padding:8px;">Searching...</div>';
+  const snap = await db.ref('users').get();
   const out = [];
   snap.forEach(child => {
     const u = { uid: child.key, ...child.val() };
-    if (u.uid === ME.uid) return;
-    if (u.status !== 'approved') return;
-    if (u.handle.includes(q.toLowerCase()) || u.displayName.toLowerCase().includes(q.toLowerCase())) out.push(u);
+    if (u.uid === ME.uid) return;                           // skip self
+    if (u.status === 'banned') return;                     // skip banned
+    const handle = (u.handle || '').toLowerCase();
+    const name   = (u.displayName || '').toLowerCase();
+    if (handle.includes(qLow) || name.includes(qLow)) out.push(u);
   });
   results.innerHTML = '';
-  out.slice(0,10).forEach(u => {
+  if (!out.length) {
+    results.innerHTML = '<div style="color:var(--text3);font-size:0.85rem;padding:10px;">No users found. Make sure they are approved.</div>';
+    return;
+  }
+  out.slice(0,15).forEach(u => {
     const div = document.createElement('div');
     div.className = 'user-search-result';
-    div.innerHTML = `<div class="avatar" style="width:42px;height:42px;font-size:0.9rem;">${avatarHTML(u)}</div><div><div class="u-name">${esc(u.displayName)}</div><div class="u-handle">@${esc(u.handle)}</div></div>`;
+    const statusColor = u.status === 'approved' ? '#25d366' : '#f59e0b';
+    div.innerHTML = `
+      <div class="avatar" style="width:44px;height:44px;font-size:1rem;flex-shrink:0;">${avatarHTML(u)}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="u-name">${esc(u.displayName)}</div>
+        <div class="u-handle">@${esc(u.handle||'(no handle)')}</div>
+      </div>
+      <span style="font-size:0.72rem;color:${statusColor};font-weight:700;">${(u.status||'pending').toUpperCase()}</span>`;
     div.onclick = () => startChat(u);
     results.appendChild(div);
   });
-  if (!out.length) results.innerHTML = '<div style="color:var(--text3);font-size:0.85rem;padding:10px;">No users found.</div>';
 }
 
 async function startChat(user) {
@@ -1200,6 +1231,18 @@ async function startChat(user) {
   await db.ref(`userChats/${user.uid}/${chatId}`).update({ otherUid: ME.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
   closeModal('newChatModal');
   openChat(chatId, user.uid);
+}
+
+async function deleteChat(chatId, otherName) {
+  if (!confirm(`Delete your chat with ${otherName}?\nThis removes it from YOUR list only. The other person's copy is not affected.`)) return;
+  // close chat pane if currently open
+  if (currentChatId === chatId) {
+    closeChat();
+    document.getElementById('emptyState').style.display = 'flex';
+  }
+  // remove only from MY userChats — not the other person's
+  await db.ref(`userChats/${ME.uid}/${chatId}`).remove();
+  showToast('Chat deleted.');
 }
 
 // ═══════════════════════════════════════════════
@@ -1232,6 +1275,33 @@ async function uploadAvatar(input) {
   showToast('Photo updated!');
 }
 function copyHandle() { navigator.clipboard.writeText(ME.handle); showToast('Handle copied!'); }
+
+async function deleteMyAccount() {
+  const confirmed = confirm('⚠️ DELETE ACCOUNT?\n\nThis will permanently erase:\n• Your profile\n• Your handle\n• Your chat list\n\nThis CANNOT be undone.\n\nType your handle to confirm.');
+  if (!confirmed) return;
+  const input = prompt(`Type your handle to confirm: ${ME.handle}`);
+  if (!input || input.trim().toLowerCase() !== ME.handle.toLowerCase()) {
+    showToast('Handle did not match. Account NOT deleted.'); return;
+  }
+  try {
+    // 1. Remove from DB
+    await db.ref(`users/${ME.uid}`).remove();
+    await db.ref(`handles/${ME.handle}`).remove();
+    await db.ref(`userChats/${ME.uid}`).remove();
+    await db.ref(`presence/${ME.uid}`).remove();
+    // 2. Delete Firebase Auth account
+    await auth.currentUser.delete();
+    showToast('Account deleted.');
+    location.reload();
+  } catch(e) {
+    // Firebase requires recent login to delete auth account
+    if (e.code === 'auth/requires-recent-login') {
+      showToast('Please sign out and sign back in, then try again.');
+    } else {
+      showToast('Error: ' + e.message);
+    }
+  }
+}
 
 // ═══════════════════════════════════════════════
 //  ADMIN PANEL
