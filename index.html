@@ -1182,8 +1182,7 @@ function buildBubble(msg) {
   if (msg.text) {
     const t = document.createElement('div');
     t.className = 'msg-text';
-    t.textContent = msg.text; // textContent preserves 
-, white-space:pre-wrap renders it
+    t.textContent = msg.text; // textContent preserves newlines, white-space:pre-wrap renders them
     bubble.appendChild(t);
   }
 
@@ -1240,7 +1239,8 @@ function buildBubble(msg) {
 // ═══════════════════════════════════════════════
 async function sendMessage() {
   if (!navigator.onLine) { showToast('No internet — cannot send message.'); return; }
-  const text = document.getElementById('msgInput').value.replace(/^[\n]+|[\n]+$/g, '');
+  const rawText = document.getElementById('msgInput').value;
+  const text = rawText.replace(/^\n+|\n+$/g, '');
   if (!text && !replyTarget) return;
   if (!currentChatId) return;
   const inp = document.getElementById('msgInput');
@@ -1547,17 +1547,18 @@ function previewAvatarURL(url) {
   msgEl.textContent = 'Loading preview...';
 
   const img = new Image();
+  // No crossOrigin — Imgur supports direct loading without CORS headers needed
   img.onload = () => {
     content.innerHTML = `<img src="${resolved}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`;
     msgEl.style.color = '#128c7e';
-    msgEl.textContent = '✓ Image loaded successfully!';
+    msgEl.textContent = 'Image loaded successfully!';
   };
   img.onerror = () => {
     content.innerHTML = initials(ME.displayName);
     msgEl.style.color = '#e53935';
-    msgEl.textContent = 'Cannot load this image. Make sure it is a direct Imgur link ending in .jpg or .png';
+    msgEl.textContent = 'Cannot load. Use a direct link like https://i.imgur.com/xxxxx.jpg';
   };
-  img.src = resolved;
+  img.src = resolved + (resolved.includes('?') ? '&' : '?') + '_t=' + Date.now();
 }
 
 function clearAvatarURL() {
