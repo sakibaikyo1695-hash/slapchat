@@ -526,6 +526,21 @@ input, textarea { font-family:var(--font); }
     </div>
     <button class="btn-primary" id="authBtn" onclick="doAuth()">SIGN IN</button>
     <div class="auth-msg" id="authMsg"></div>
+    <div id="forgotRow" style="text-align:center;">
+      <button onclick="showForgotPassword()" style="font-size:0.85rem;color:var(--accent);text-decoration:underline;background:none;border:none;cursor:pointer;font-family:var(--font);">Forgot password?</button>
+    </div>
+  </div>
+
+  <!-- Forgot Password card -->
+  <div class="auth-card" id="forgotCard" style="display:none;">
+    <h2>RESET PASSWORD</h2>
+    <p style="font-size:0.85rem;color:var(--text2);line-height:1.5;">Enter your email address. We will send you a password reset link.</p>
+    <input class="inp" id="forgotEmail" type="email" placeholder="Email address" autocomplete="email"/>
+    <button class="btn-primary" onclick="sendPasswordReset()">SEND RESET LINK</button>
+    <div class="auth-msg" id="forgotMsg"></div>
+    <div style="text-align:center;">
+      <button onclick="showAuthForm()" style="font-size:0.85rem;color:var(--accent);text-decoration:underline;background:none;border:none;cursor:pointer;font-family:var(--font);">← Back to Login</button>
+    </div>
   </div>
 
   <!-- Pending approval card -->
@@ -637,6 +652,18 @@ input, textarea { font-family:var(--font); }
       <button class="btn-sm btn-accent" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);" onclick="closeModal('profileModal')">Cancel</button>
       <button class="btn-sm btn-primary" style="border-radius:8px;padding:8px 20px;" onclick="saveProfile()">SAVE</button>
     </div>
+    <!-- Change Password -->
+    <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;">
+      <div style="font-size:0.8rem;color:var(--text3);font-family:var(--mono);letter-spacing:1px;margin-bottom:8px;">CHANGE PASSWORD</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <input class="inp" id="newPassword" type="password" placeholder="New password (min 6 chars)"/>
+        <input class="inp" id="confirmPassword" type="password" placeholder="Confirm new password"/>
+        <button onclick="changePassword()" style="padding:10px;border-radius:8px;background:#128c7e;color:#fff;font-family:var(--font);font-size:0.9rem;font-weight:700;cursor:pointer;border:none;">🔑 CHANGE PASSWORD</button>
+        <div id="pwMsg" style="font-size:0.82rem;min-height:16px;text-align:center;"></div>
+      </div>
+    </div>
+
+    <!-- Delete Account -->
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;">
       <button onclick="deleteMyAccount()" style="width:100%;padding:11px;border-radius:10px;background:#fff0f0;border:1px solid #ffcdd2;color:#e53935;font-family:var(--font);font-size:0.95rem;font-weight:700;cursor:pointer;transition:background .2s;">
         🗑️ DELETE MY ACCOUNT PERMANENTLY
@@ -779,7 +806,11 @@ auth.onAuthStateChanged(async user => {
 //  AUTH FLOW
 // ═══════════════════════════════════════════════
 let authMode = 'login';
-function showAuthForm() { hide('loadingScreen'); show('authScreen'); hide('pendingCard'); show('authCard'); }
+function showAuthForm() {
+  hide('loadingScreen'); show('authScreen');
+  hide('pendingCard'); show('authCard');
+  document.getElementById('forgotCard').style.display = 'none';
+}
 function showPending()  { hide('loadingScreen'); show('authScreen'); hide('authCard'); show('pendingCard'); }
 
 function switchTab(mode) {
@@ -789,6 +820,7 @@ function switchTab(mode) {
   document.getElementById('authTitle').textContent = mode==='login' ? 'SIGN IN' : 'REGISTER';
   document.getElementById('authBtn').textContent   = mode==='login' ? 'SIGN IN' : 'CREATE ACCOUNT';
   document.getElementById('regFields').style.display = mode==='register' ? 'flex' : 'none';
+  document.getElementById('forgotRow').style.display  = mode==='login'    ? ''     : 'none';
   setMsg('');
 }
 
@@ -1328,6 +1360,59 @@ async function uploadAvatar(input) {
   input.value = '';
 }
 function copyHandle() { navigator.clipboard.writeText(ME.handle); showToast('Handle copied!'); }
+
+// ── FORGOT PASSWORD ──────────────────────────────
+function showForgotPassword() {
+  document.getElementById('authCard').style.display   = 'none';
+  document.getElementById('forgotCard').style.display = 'flex';
+  document.getElementById('forgotCard').style.flexDirection = 'column';
+  document.getElementById('forgotEmail').value = document.getElementById('authEmail').value || '';
+  document.getElementById('forgotMsg').textContent = '';
+}
+
+async function sendPasswordReset() {
+  const email = document.getElementById('forgotEmail').value.trim();
+  const msgEl = document.getElementById('forgotMsg');
+  if (!email) { msgEl.textContent = 'Please enter your email.'; msgEl.style.color = 'var(--red)'; return; }
+  try {
+    await auth.sendPasswordResetEmail(email);
+    msgEl.textContent = '✓ Reset link sent! Check your email inbox.';
+    msgEl.style.color = 'var(--green)';
+  } catch(e) {
+    const errs = {
+      'auth/user-not-found': 'No account found with this email.',
+      'auth/invalid-email':  'Invalid email address.',
+    };
+    msgEl.textContent = errs[e.code] || e.message;
+    msgEl.style.color = 'var(--red)';
+  }
+}
+
+// ── CHANGE PASSWORD ──────────────────────────────
+async function changePassword() {
+  const newPw  = document.getElementById('newPassword').value;
+  const confPw = document.getElementById('confirmPassword').value;
+  const msgEl  = document.getElementById('pwMsg');
+  msgEl.style.color = 'var(--red)';
+
+  if (!newPw || !confPw) { msgEl.textContent = 'Please fill both fields.'; return; }
+  if (newPw.length < 6)  { msgEl.textContent = 'Password must be at least 6 characters.'; return; }
+  if (newPw !== confPw)  { msgEl.textContent = 'Passwords do not match.'; return; }
+
+  try {
+    await auth.currentUser.updatePassword(newPw);
+    msgEl.style.color = 'var(--green)';
+    msgEl.textContent = '✓ Password changed successfully!';
+    document.getElementById('newPassword').value    = '';
+    document.getElementById('confirmPassword').value = '';
+  } catch(e) {
+    if (e.code === 'auth/requires-recent-login') {
+      msgEl.textContent = 'Please sign out and sign back in, then try again.';
+    } else {
+      msgEl.textContent = e.message;
+    }
+  }
+}
 
 async function deleteMyAccount() {
   const confirmed = confirm('⚠️ DELETE ACCOUNT?\n\nThis will permanently erase:\n• Your profile\n• Your handle\n• Your chat list\n\nThis CANNOT be undone.\n\nType your handle to confirm.');
