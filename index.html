@@ -908,60 +908,96 @@ function bootWithOfflineSession(session) {
   }
 }
 
-// ── Check offline cache at startup — BEFORE onAuthStateChanged fires ──
+// ════════════════════════════════════════════
+//  STARTUP: Check offline cache SYNCHRONOUSLY
+//  This runs BEFORE Firebase Auth fires.
+//  If offline + cache found → boot immediately.
+//  onAuthStateChanged will see _offlineBooted=true and skip.
+// ════════════════════════════════════════════
 (function() {
   var cachedSession = loadOfflineSession();
   if (!isOnline()) {
     if (cachedSession) {
-      _offlineBooted = true;
+      // Offline + cache found — boot NOW before Firebase fires
       bootWithOfflineSession(cachedSession);
+    } else {
+      // Offline, no cache — show login, let user know
+      hide('loadingScreen');
+      showAuthForm();
+      setTimeout(function() {
+        setMsg('No internet connection. Please connect to log in.', 'error');
+      }, 100);
     }
-    // else: stay on login screen
   } else {
+    // Online — Firebase will handle it, but show "Restoring session" if cached
     if (cachedSession) {
-      // Online with cache — Firebase will take over, show "Restoring..."
       setMsg('Restoring session...', '');
     }
+    // Keep loading screen visible — onAuthStateChanged will remove it
   }
 })();
 
 // ═══════════════════════════════════════════════
-//  BOOT — Firebase Auth Gate
+//  BOOT — Firebase Auth Gate (online path)
 // ═══════════════════════════════════════════════
 auth.onAuthStateChanged(async user => {
-  if (_offlineBooted) return;   // already booted from cache — don't override
+  // Already booted from offline cache — do nothing
+  if (_offlineBooted) {
+    // But if Firebase comes back online, silently reconnect in background
+    if (user && isOnline()) {
+      // Refresh chats from Firebase silently
+      try { loadChats(); } catch(e) {}
+    }
+    return;
+  }
 
+  // Not offline-booted — we are online (or trying to be)
   hide('loadingScreen');
 
-  if (!user) { showAuthForm(); return; }
+  if (!user) {
+    // No user logged in at all
+    showAuthForm();
+    return;
+  }
 
+  // User is logged in — fetch their profile from Firebase
   let snap;
   try {
-    snap = await db.ref(`users/${user.uid}`).get();
+    snap = await db.ref('users/' + user.uid).get();
   } catch(e) {
-    // Firebase failed — fallback to offline cache
+    // Firebase DB unreachable — try offline cache as last resort
     var session = loadOfflineSession();
     if (session && session.uid === user.uid) {
       bootWithOfflineSession(session);
     } else {
       showAuthForm();
-      showToast('Cannot connect. Check internet.');
+      showToast('Cannot reach server. Check internet.');
     }
     return;
   }
 
-  if (!snap || !snap.exists()) { showAuthForm(); auth.signOut(); return; }
+  if (!snap || !snap.exists()) {
+    showAuthForm();
+    auth.signOut();
+    return;
+  }
 
   ME = snap.val();
   ME.uid = user.uid;
 
   if (ME.status === 'pending') { showPending(); return; }
-  if (ME.status === 'banned')  { showToast('Your account has been banned.'); auth.signOut(); return; }
+  if (ME.status === 'banned')  {
+    showToast('Your account has been banned.');
+    clearOfflineSession();
+    auth.signOut();
+    return;
+  }
 
-  // ── Save offline session (exact SimpliFly pattern) ──
+  // Approved — save session for next offline open
   saveOfflineSession(user.uid, ME);
   localStorage.setItem('sc_me', JSON.stringify(ME));
 
+  // Boot app normally
   hide('authScreen');
   show('app');
   setupPresence(user.uid);
@@ -970,6 +1006,14 @@ auth.onAuthStateChanged(async user => {
   requestNotifPermission();
   listenForIncomingMessages();
   if (ME.role === 'admin') show('adminBtn');
+
+  // Once online again after offline boot — reconnect Firebase listeners
+  window.addEventListener('online', function onBackOnline() {
+    window.removeEventListener('online', onBackOnline);
+    showToast('Back online ✓');
+    loadChats();
+    listenForIncomingMessages();
+  });
 });
 
 // ═══════════════════════════════════════════════
