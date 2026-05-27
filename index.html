@@ -677,8 +677,9 @@ input, textarea { font-family:var(--font); }
         <div style="font-weight:700;color:#128c7e;margin-bottom:6px;">📷 How to set your photo (Imgur — free)</div>
         <div>1. Open <a href="https://imgur.com/upload" target="_blank" style="color:#128c7e;font-weight:600;">imgur.com/upload</a> on your phone/laptop</div>
         <div>2. Upload your photo there</div>
-        <div>3. After upload — <b>right-click the image → Copy image address</b></div>
-        <div>4. Paste that link below → your photo will appear</div>
+        <div>3. After upload — tap/click the image to open it</div>
+        <div>4. Copy the URL from the address bar (it will look like imgur.com/aBcDeFg)</div>
+        <div>5. Paste that link below → your photo will appear automatically</div>
         <div style="margin-top:4px;color:#888;font-size:0.78rem;">⚠️ Google Photos and Google Drive links will NOT work due to browser security.</div>
       </div>
 
@@ -985,12 +986,20 @@ function loadChats() {
 }
 
 async function renderChatList(chats) {
+  // Deduplicate by chatId — keep only the latest entry per chatId
+  const seen = {};
+  const unique = [];
+  chats.forEach(c => {
+    if (!c.chatId) return;
+    if (!seen[c.chatId]) { seen[c.chatId] = true; unique.push(c); }
+  });
   // sort by last message time desc
-  chats.sort((a,b) => (b.lastTime||0) - (a.lastTime||0));
+  unique.sort((a,b) => (b.lastTime||0) - (a.lastTime||0));
   const list = document.getElementById('chatList');
   list.innerHTML = '';
+  chats = unique;
 
-  for (const c of chats) {
+  for (const c of unique) {
     const other = await getUser(c.otherUid);
     const presence = await getPresence(c.otherUid);
     const unread = (c.unread || 0);
@@ -1517,6 +1526,20 @@ function resolveImageURL(url) {
       url.includes('drive.google.com') || url.includes('googleusercontent.com')) {
     return '__blocked__';
   }
+  // Convert Imgur page link → direct image link
+  // e.g. https://imgur.com/aBcDeFg → https://i.imgur.com/aBcDeFg.jpg
+  // e.g. https://imgur.com/a/aBcDeFg (album) → can't convert, return as-is
+  if (url.includes('imgur.com') && !url.includes('i.imgur.com')) {
+    // Already a direct link with extension — return as-is
+    if (/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i.test(url)) return url;
+    // Page link like imgur.com/aBcDeFg — extract ID and make direct link
+    const match = url.match(/imgur\.com\/([a-zA-Z0-9]+)$/);
+    if (match) return 'https://i.imgur.com/' + match[1] + '.jpg';
+  }
+  // i.imgur.com link without extension — add .jpg
+  if (url.includes('i.imgur.com') && !/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i.test(url)) {
+    return url + '.jpg';
+  }
   return url;
 }
 
@@ -1556,7 +1579,7 @@ function previewAvatarURL(url) {
   img.onerror = () => {
     content.innerHTML = initials(ME.displayName);
     msgEl.style.color = '#e53935';
-    msgEl.textContent = 'Cannot load. Use a direct link like https://i.imgur.com/xxxxx.jpg';
+    msgEl.textContent = 'Cannot load image. Copy the link from Imgur after uploading your photo.';
   };
   img.src = resolved + (resolved.includes('?') ? '&' : '?') + '_t=' + Date.now();
 }
