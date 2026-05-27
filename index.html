@@ -1803,13 +1803,10 @@ async function searchUsers(q) {
 async function startChat(user) {
   const chatId = [ME.uid, user.uid].sort().join('_');
 
-  // Check if this chat was previously deleted from DB
-  // If myUserChats entry doesn't exist, clear old message cache
-  const myEntry = await db.ref('userChats/' + ME.uid + '/' + chatId).get();
-  if (!myEntry.exists()) {
-    // Fresh start — clear any stale cached messages
-    localStorage.removeItem('sc_msgs_' + chatId);
-  }
+  // Always clear stale message cache when starting/restarting a chat
+  // This covers: deleted-for-me, first time chat, any stale state
+  localStorage.removeItem('sc_msgs_' + chatId);
+  localStorage.removeItem('sc_deleted_' + ME.uid + '_' + chatId);
 
   await db.ref('userChats/' + ME.uid + '/' + chatId).update({ chatId, otherUid: user.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
   await db.ref('userChats/' + user.uid + '/' + chatId).update({ chatId, otherUid: ME.uid, lastMsg:'', lastTime: Date.now(), unread:0 });
@@ -1868,31 +1865,25 @@ async function _doChatDelete(chatId, both) {
     document.getElementById('emptyState').style.display = 'flex';
   }
 
-  // Always clear MY localStorage cache for this chat
+  // ALWAYS clear local message cache — so messages never reappear
   localStorage.removeItem('sc_msgs_' + chatId);
 
   // Remove from MY userChats
   await db.ref('userChats/' + ME.uid + '/' + chatId).remove();
+  delete chatsCache[chatId];
 
   if (both) {
-    // Get the other user's uid from chatsCache
     const chat = chatsCache[chatId];
     const otherUid = chat ? chat.otherUid : null;
-
-    // Delete all messages in this chat
     await db.ref('messages/' + chatId).remove();
-
-    // Remove from OTHER person's userChats too
     if (otherUid) {
       await db.ref('userChats/' + otherUid + '/' + chatId).remove();
     }
-
-    // Clear their localStorage cache too (won't work cross-device
-    // but good to clear locally in case they're on same device)
-    localStorage.removeItem('sc_msgs_' + chatId);
-
     showToast('Chat deleted for everyone.');
   } else {
+    // MY side only — but store a "deleted marker" so even if cache
+    // somehow survives, startChat knows to wipe it
+    localStorage.setItem('sc_deleted_' + ME.uid + '_' + chatId, '1');
     showToast('Chat deleted for you.');
   }
 }
