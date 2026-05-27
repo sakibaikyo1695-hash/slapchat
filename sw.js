@@ -1,77 +1,97 @@
 // ═══════════════════════════════════════════════
 //  SLAPCHAT — SERVICE WORKER
-//  Version: bump this string to force cache refresh
+//  Bump version string below to force cache refresh
 // ═══════════════════════════════════════════════
-const CACHE_NAME = 'slapchat-v1';
+const CACHE_NAME = 'slapchat-v3';
+const SCOPE      = '/slapchat/';   // ← your GitHub Pages subpath
 
-// Files to cache for offline shell
 const SHELL_FILES = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  // Google Fonts (cached on first load)
-  'https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap'
+  SCOPE,
+  SCOPE + 'index.html',
+  SCOPE + 'manifest.json',
+  SCOPE + 'icon-192.png',
+  SCOPE + 'icon-512.png',
+  SCOPE + 'sw.js',
 ];
 
-// ── INSTALL — cache the app shell ──────────────
+// ── INSTALL — pre-cache shell ───────────────────
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(SHELL_FILES);
-    })
+      // addAll fails if ANY file 404s — add individually so one bad file doesn't break everything
+      return Promise.allSettled(
+        SHELL_FILES.map(url => cache.add(url).catch(e => console.warn('Cache miss:', url, e)))
+      );
+    }).then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
-// ── ACTIVATE — clean up old caches ─────────────
+// ── ACTIVATE — remove old caches ───────────────
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(
-        keys
-          .filter(key => key !== CACHE_NAME)
-          .map(key => caches.delete(key))
+        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
       )
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// ── FETCH — serve from cache, fall back to network ──
+// ── FETCH — network-first for Firebase, cache-first for shell ──
 self.addEventListener('fetch', event => {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') return;
+
   const url = new URL(event.request.url);
 
-  // Always go to network for Firebase (real-time data must be live)
-  if (
-    url.hostname.includes('firebaseio.com')     ||
-    url.hostname.includes('firebaseapp.com')    ||
-    url.hostname.includes('googleapis.com')     ||
-    url.hostname.includes('gstatic.com')        ||
-    url.hostname.includes('firebasestorage')
-  ) {
-    event.respondWith(fetch(event.request));
+  // ── Always network for Firebase & external APIs ──
+  const networkOnly = [
+    'firebaseio.com',
+    'firebaseapp.com',
+    'identitytoolkit.googleapis.com',
+    'securetoken.googleapis.com',
+    'firebasestorage.googleapis.com',
+    'gstatic.com',
+  ];
+  if (networkOnly.some(h => url.hostname.includes(h))) {
+    // Don't intercept — let browser handle directly
     return;
   }
 
-  // Cache-first for everything else (app shell, fonts)
+  // ── Google Fonts — network with cache fallback ──
+  if (url.hostname.includes('fonts.googleapis.com') || url.hostname.includes('fonts.gstatic.com')) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(cache =>
+        cache.match(event.request).then(cached => {
+          if (cached) return cached;
+          return fetch(event.request).then(response => {
+            if (response && response.status === 200) {
+              cache.put(event.request, response.clone());
+            }
+            return response;
+          }).catch(() => cached);
+        })
+      )
+    );
+    return;
+  }
+
+  // ── App shell — cache-first, network fallback ──
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
+
       return fetch(event.request).then(response => {
-        // Cache valid responses for future offline use
-        if (
-          response &&
-          response.status === 200 &&
-          response.type !== 'opaque'
-        ) {
+        if (response && response.status === 200 && response.type !== 'opaque') {
           const clone = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         }
         return response;
       }).catch(() => {
-        // If completely offline and not cached, return the app shell
+        // Offline fallback — return the cached app shell for navigation requests
         if (event.request.destination === 'document') {
-          return caches.match('/index.html');
+          return caches.match(SCOPE + 'index.html')
+              || caches.match(SCOPE);
         }
       });
     })
