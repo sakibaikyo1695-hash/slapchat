@@ -293,9 +293,13 @@ input, textarea { font-family:var(--font); }
 
 /* input bar */
 .input-bar {
-  padding:10px 14px; padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px));
+  display:flex; gap:8px; align-items:flex-end;
+  padding:10px 14px;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px));
   background:#f0f2f5; border-top:1px solid var(--border);
-  display:flex; align-items:flex-end; gap:10px;
+  flex-shrink:0;
+  position:relative;
+  z-index:10;
 }
 .reply-preview {
   display:none; background:#f0f2f5; border-left:3px solid var(--accent);
@@ -417,13 +421,14 @@ input, textarea { font-family:var(--font); }
 @media (max-width: 700px) {
   :root { --sidebar-w: 100vw; }
 
-  /* Lock the entire app to viewport — prevents resize on keyboard open */
+  /* Lock viewport — SimpliFly pattern */
   html, body {
     height: 100%;
     height: -webkit-fill-available;
     overflow: hidden;
     position: fixed;
     width: 100%;
+    overscroll-behavior: none;
   }
 
 
@@ -450,23 +455,23 @@ input, textarea { font-family:var(--font); }
     z-index: 20;
     display: flex;
     flex-direction: column;
-    /* Use dvh (dynamic viewport height) so layout adjusts with keyboard */
-    height: 100dvh;
+    height: 100%;
+    height: -webkit-fill-available;
   }
   #chatWindow.open {
     transform: translateX(0);
   }
-  /* Messages area fills all remaining space above input */
+  /* Messages area fills space above input */
   #chatWindow #messagesArea {
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    min-height: 0;
   }
-  /* Input bar always stays at bottom above keyboard */
+  /* Input bar: always above home bar — SimpliFly exact pattern */
   #chatWindow .input-bar {
     flex-shrink: 0;
-    position: sticky;
-    bottom: 0;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Show back button on mobile */
