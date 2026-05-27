@@ -14,7 +14,6 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 
 <style>
 /* ═══════════════════════════════════════════════
@@ -246,7 +245,6 @@ input, textarea { font-family:var(--font); }
 
 .msg-sender { font-size:0.78rem; color:var(--accent); font-weight:600; margin-bottom:3px; }
 .msg-text { font-size:0.95rem; color:var(--text); line-height:1.4; }
-.msg-image { max-width:100%; border-radius:8px; display:block; margin-top:4px; cursor:zoom-in; }
 .msg-footer { display:flex; align-items:center; justify-content:flex-end; gap:5px; margin-top:4px; }
 .msg-time { font-size:0.7rem; color:var(--text3); }
 .msg-tick { font-size:0.75rem; color:var(--tick); }
@@ -397,14 +395,7 @@ input, textarea { font-family:var(--font); }
 .btn-ban { background:var(--red); color:#fff; }
 .btn-unban { background:var(--yellow); color:#000; }
 
-/* image lightbox */
-#lightbox {
-  display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:2000;
-  align-items:center; justify-content:center;
-}
-#lightbox.show { display:flex; }
-#lightbox img { max-width:95vw; max-height:95vh; border-radius:10px; }
-#lightbox .close-lb { position:absolute; top:16px; right:16px; font-size:2rem; color:#fff; cursor:pointer; }
+
 
 /* toast */
 #toast {
@@ -529,8 +520,7 @@ input, textarea { font-family:var(--font); }
         <div class="msg-input-wrap">
           <button class="emoji-btn" onclick="toggleEmojiPanel()">😊</button>
           <textarea id="msgInput" rows="1" placeholder="Type a message..." oninput="autoResize(this);handleTyping()" onkeydown="handleKey(event)"></textarea>
-          <button class="attach-btn" onclick="document.getElementById('fileInput').click()">📎</button>
-          <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="sendImage(this)"/>
+
         </div>
         <button class="send-btn" onclick="sendMessage()">➤</button>
       </div>
@@ -557,11 +547,11 @@ input, textarea { font-family:var(--font); }
   <div class="modal">
     <h2>MY PROFILE</h2>
     <div class="profile-avatar-wrap">
-      <div class="profile-avatar-large" onclick="document.getElementById('avatarInput').click()">
+      <div class="profile-avatar-large">
         <span id="profileAvatarContent"></span>
-        <div class="edit-overlay">📷</div>
+        
       </div>
-      <input type="file" id="avatarInput" accept="image/*" style="display:none" onchange="uploadAvatar(this)"/>
+      
     </div>
     <div class="profile-info-row">
       <label>DISPLAY NAME</label>
@@ -635,11 +625,7 @@ input, textarea { font-family:var(--font); }
   </div>
 </div>
 
-<!-- Image Lightbox -->
-<div id="lightbox" onclick="closeLightbox()">
-  <span class="close-lb">✕</span>
-  <img id="lightboxImg" src="" alt=""/>
-</div>
+
 
 <!-- Toast -->
 <div id="toast"></div>
@@ -679,7 +665,6 @@ const FIREBASE_CONFIG = {
 firebase.initializeApp(FIREBASE_CONFIG);
 const auth     = firebase.auth();
 const db       = firebase.database();
-const storage  = firebase.storage();
 
 // ═══════════════════════════════════════════════
 //  STATE
@@ -1064,28 +1049,7 @@ async function sendMessage() {
   ref.update({ delivered: true });
 }
 
-async function sendImage(input) {
-  if (!input.files[0]) return;
-  const file = input.files[0];
-  showToast('Uploading image...');
-  const ref = storage.ref(`chat-images/${currentChatId}/${Date.now()}_${file.name}`);
-  await ref.put(file);
-  const url = await ref.getDownloadURL();
 
-  const msg = {
-    senderUid: ME.uid, senderName: ME.displayName,
-    imageURL: url, text: '', time: Date.now(),
-    delivered: false, read: false
-  };
-  const msgRef = db.ref(`messages/${currentChatId}`).push();
-  await msgRef.set(msg);
-  msgRef.update({ delivered: true });
-
-  const summary = { lastMsg: '📷 Image', lastTime: msg.time, chatId: currentChatId };
-  await db.ref(`userChats/${ME.uid}/${currentChatId}`).update({ ...summary, otherUid: currentOther });
-  await db.ref(`userChats/${currentOther}/${currentChatId}`).update({ ...summary, otherUid: ME.uid, unread: firebase.database.ServerValue.increment(1) });
-  input.value = '';
-}
 
 // ═══════════════════════════════════════════════
 //  REACTIONS
@@ -1285,15 +1249,8 @@ async function saveProfile() {
   showToast('Profile saved!');
 }
 async function uploadAvatar(input) {
-  if (!input.files[0]) return;
-  showToast('Uploading...');
-  const ref = storage.ref(`avatars/${ME.uid}`);
-  await ref.put(input.files[0]);
-  const url = await ref.getDownloadURL();
-  ME.photoURL = url;
-  await db.ref(`users/${ME.uid}`).update({ photoURL: url });
-  document.getElementById('profileAvatarContent').innerHTML = `<img src="${url}"/>`;
-  showToast('Photo updated!');
+  showToast('Photo upload requires Blaze plan. Not available.');
+  input.value = '';
 }
 function copyHandle() { navigator.clipboard.writeText(ME.handle); showToast('Handle copied!'); }
 
@@ -1521,7 +1478,7 @@ function esc(s) { const d=document.createElement('div'); d.textContent=s||''; re
 function show(id) {
   const el = document.getElementById(id);
   // Restore correct display type based on element
-  const flexIds = ['app','activeChatPane','replyPreview','newChatModal','profileModal','adminModal','lightbox'];
+  const flexIds = ['app','activeChatPane','replyPreview','newChatModal','profileModal','adminModal'];
   el.style.display = flexIds.includes(id) ? 'flex' : '';
 }
 function hide(id) { document.getElementById(id).style.display='none'; }
@@ -1540,11 +1497,6 @@ function showToast(msg) {
   toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-function openLightbox(url) {
-  document.getElementById('lightboxImg').src = url;
-  document.getElementById('lightbox').classList.add('show');
-}
-function closeLightbox() { document.getElementById('lightbox').classList.remove('show'); }
 
 function timeLabel(ts, short=false) {
   if (!ts) return '';
