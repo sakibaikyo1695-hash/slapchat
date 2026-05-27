@@ -1306,28 +1306,29 @@ async function openChat(chatId, otherUid) {
     document.getElementById('sidebar').classList.add('hidden-mobile');
   }
 
-  // Mark unread count as 0
-  db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
-  // Mark all their unread messages as READ
-  db.ref(`messages/${chatId}`).orderByChild('senderUid').once('value', snap => {
-    if (!snap.exists()) return;
-    const updates = {};
-    snap.forEach(child => {
-      const m = child.val();
-      if (m.senderUid !== ME.uid && !m.read) {
-        updates[child.key + '/read'] = true;
-        if (!m.delivered) updates[child.key + '/delivered'] = true;
-      }
+  // Only do Firebase calls when online
+  if (isOnline()) {
+    db.ref(`userChats/${ME.uid}/${chatId}`).update({ unread: 0 });
+    db.ref(`messages/${chatId}`).orderByChild('senderUid').once('value', snap => {
+      if (!snap.exists()) return;
+      const updates = {};
+      snap.forEach(child => {
+        const m = child.val();
+        if (m.senderUid !== ME.uid && !m.read) {
+          updates[child.key + '/read'] = true;
+          if (!m.delivered) updates[child.key + '/delivered'] = true;
+        }
+      });
+      if (Object.keys(updates).length > 0) db.ref(`messages/${chatId}`).update(updates);
     });
-    if (Object.keys(updates).length > 0) db.ref(`messages/${chatId}`).update(updates);
-  });
-
-  // presence for header status
-  db.ref(`presence/${otherUid}`).on('value', snap => {
-    const p = snap.val() || {};
-    document.getElementById('headerStatus').textContent =
-      p.online ? 'online' : (p.lastSeen ? 'last seen ' + timeLabel(p.lastSeen) : 'offline');
-  });
+    db.ref(`presence/${otherUid}`).on('value', snap => {
+      const p = snap.val() || {};
+      document.getElementById('headerStatus').textContent =
+        p.online ? 'online' : (p.lastSeen ? 'last seen ' + timeLabel(p.lastSeen) : 'offline');
+    });
+  } else {
+    document.getElementById('headerStatus').textContent = 'offline';
+  }
 
   listenMessages(chatId);
   renderChatList(Object.values(chatsCache));
@@ -1355,35 +1356,59 @@ function listenMessages(chatId) {
   const area = document.getElementById('messagesArea');
   area.innerHTML = '';
 
-  // Show cached messages immediately for instant offline display
   const msgCacheKey = 'sc_msgs_' + chatId;
+
+  // ── OFFLINE: show cache only, no Firebase listener ──────────────
+  if (!isOnline()) {
+    const cachedMsgs = localStorage.getItem(msgCacheKey);
+    if (cachedMsgs) {
+      try {
+        const msgs = JSON.parse(cachedMsgs);
+        if (msgs && msgs.length > 0) {
+          renderMessages(msgs, area);
+          return; // done — no Firebase needed
+        }
+      } catch(e) {}
+    }
+    area.innerHTML = '<div style="text-align:center;color:var(--text3);padding:30px;font-size:0.85rem;">No cached messages.<br>Connect to internet to load messages.</div>';
+    return;
+  }
+
+  // ── ONLINE: show cache immediately, then sync from Firebase ──────
   const cachedMsgs = localStorage.getItem(msgCacheKey);
   if (cachedMsgs) {
     try {
-      renderMessages(JSON.parse(cachedMsgs), area);
+      const msgs = JSON.parse(cachedMsgs);
+      if (msgs && msgs.length > 0) renderMessages(msgs, area);
     } catch(e) {}
   }
 
+  // Attach Firebase live listener
   const ref = db.ref(`messages/${chatId}`).orderByChild('time');
   msgsListener = ref.on('value', snap => {
-    // Debounce: wait 120ms before rendering so rapid sequential
-    // events (e.g. from updating delivered/read flags) only render once
     if (_msgRenderTimer) clearTimeout(_msgRenderTimer);
     _msgRenderTimer = setTimeout(() => {
       _msgRenderTimer = null;
+
       if (!snap || !snap.exists()) {
-        area.innerHTML = '<div style="text-align:center;color:var(--text3);padding:30px;font-size:0.85rem;">No messages yet. Say hello! 👋</div>';
+        // Only show empty state if we also have no cache
+        const still = localStorage.getItem(msgCacheKey);
+        if (!still) {
+          area.innerHTML = '<div style="text-align:center;color:var(--text3);padding:30px;font-size:0.85rem;">No messages yet. Say hello! 👋</div>';
+        }
         return;
       }
+
       const msgsArray = [];
       snap.forEach(child => {
         if (child.val()) msgsArray.push({ id: child.key, ...child.val() });
       });
 
       renderMessages(msgsArray, area);
+      // Update localStorage cache with fresh data
       localStorage.setItem(msgCacheKey, JSON.stringify(msgsArray.slice(-100)));
 
-      // Mark receipts AFTER render, not before — avoids triggering re-render loop
+      // Mark read/delivered receipts
       const updates = {};
       msgsArray.forEach(msg => {
         if (msg.senderUid === ME.uid) return;
@@ -1402,7 +1427,15 @@ function listenMessages(chatId) {
       }
     }, 120);
   }, err => {
-    console.log('Offline — showing cached messages');
+    // Firebase error — keep showing cache, don't wipe it
+    console.log('Firebase messages error (offline?):', err.message);
+    const still = localStorage.getItem(msgCacheKey);
+    if (still) {
+      try {
+        const msgs = JSON.parse(still);
+        if (msgs && msgs.length > 0) renderMessages(msgs, area);
+      } catch(e) {}
+    }
   });
 }
 
